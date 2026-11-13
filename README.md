@@ -1,13 +1,45 @@
-# Internet-Draft Template Repository
+<!-- regenerate: off -->
 
-Use this repository as a template if you want to start working on
-[IETF](https://www.ietf.org/) documents. [Click here to create a new repository using the
-template](https://github.com/martinthomson/internet-draft-template/generate).
-Make sure to check "Include all branches", or you will need to enable GitHub Pages manually.
+# JSON Structure: Schema Projections
 
-[Read the
-instructions](https://github.com/martinthomson/i-d-template/blob/main/doc/TEMPLATE.md)
-for more information.
+This is the working area for the individual Internet-Draft,
+"JSON Structure: Schema Projections".
 
-Once you have created your own repository, start work by
-[renaming the `draft-todo-yourname-protocol.md` file](../../edit/main/draft-todo-yourname-protocol.md).
+JSON Structure is the canonical, representation-neutral definition model.
+The specification derives JSON Schema, Avro, Protocol Buffers, XML Schema
+(XSD), and CDDL schemas from that model, together with the value bindings
+needed by their serializers. It also defines imports into the model and
+the conditions under which values, constraints, and type information survive.
+
+* [Editor's Copy](https://json-structure.github.io/projections/draft-vasters-json-structure-projections.html)
+* [Draft Source](draft-vasters-json-structure-projections.md)
+* [Issues](https://github.com/json-structure/projections/issues)
+
+## Contributing
+
+See the [contribution guidelines](CONTRIBUTING.md). Contributions can be made
+by creating issues or pull requests.
+
+## Command Line Usage
+
+Formatted text and HTML versions of the draft can be built using `make`.
+
+```sh
+make
+```
+
+Check formatting and references with:
+
+```sh
+make lint
+```
+
+The build uses the
+[Internet-Draft template tools](https://github.com/martinthomson/i-d-template).
+See the [setup instructions](https://github.com/martinthomson/i-d-template/blob/main/doc/SETUP.md)
+for dependencies. On Windows, run `make` in WSL or another supported POSIX
+environment.
+
+Pushes build and publish the editor's copy through GitHub Pages. Creating a
+draft release is a separate publication step; an ordinary push does not submit
+the draft to the IETF Datatracker.
