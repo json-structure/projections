@@ -26,12 +26,10 @@ author:
     email: clemensv@microsoft.com
 
 normative:
-  RFC2119:
   RFC3339:
   RFC3986:
   RFC4648:
   RFC6901:
-  RFC8174:
   RFC8259:
   RFC8610:
   RFC8949:
@@ -153,7 +151,7 @@ projection uses `int64`, and a Protocol Buffers serializer applies that
 schema's field numbers and wire encoding.
 
 No intermediate JSON document is required. The JSON Structure definition is
-written in JSON, and Core specifies JSON encodings for its types, but neither
+written in JSON {{RFC8259}}, and Core specifies JSON encodings for its types, but neither
 fact requires a non-JSON representation to use JSON's carriers. The decimal
 string used for `int64` in JSON is a serialization rule, not the abstract
 integer's value or a requirement to use strings in Avro.
@@ -214,7 +212,7 @@ used by one serialization of model instances. In particular:
   representation is a string.
 * A `decimal` is an exact base-10 numeric value. Its JSON spelling does
   not require a textual carrier where a suitable native decimal exists.
-* A `binary` is an octet sequence. Base64 is one way of serializing it,
+* A `binary` is an octet sequence. Base64 {{RFC4648}} is one way of serializing it,
   not the value to supply to a native byte-string serializer.
 * Objects, tuples, maps, collections, and choices retain their model
   structure even when the target represents them with different constructs.
@@ -1611,15 +1609,15 @@ and the Core fractional-part syntax MUST be restored on reversal.
 
 XSD date and time datatypes can admit absent timezones, different year
 domains, and lexical forms such as an end-of-day time that Core does
-not accept. Core `datetime` and `time` require an RFC 3339 offset;
+not accept. Core `datetime` and `time` require an {{RFC3339}} offset;
 Core `date` has no appended timezone. The XSD projection MUST add
 the applicable timezone, calendar, and lexical restrictions. A plain
 built-in temporal type is not an exact mapping merely because its
 name resembles the Core type.
 
 The `xs:anyURI` value space and whitespace handling are not an
-RFC 3986 URI-reference assertion. Exact Core URI validation needs a
-compatible restriction or additional validation. UUID and JSON Pointer
+{{RFC3986}} URI-reference assertion. Exact Core URI validation needs a
+compatible restriction or additional validation. UUID {{RFC9562}} and JSON Pointer
 have no built-in XSD datatype.
 
 ### XML Text and Binary Values {#xsd-text}
@@ -2017,7 +2015,7 @@ when a schema round trip is required. A CBOR tag for a semantic
 string type MAY be used under a declared tag profile, but its identity
 and content constraints MUST be checked. For example, the CDDL
 prelude's tag-0 text rule does not by itself validate every character
-of an RFC 3339 date-time.
+of an {{RFC3339}} date-time.
 
 For Core `any`, a recursive target rule MUST restrict maps to text
 keys, arrays to recursively compatible values, and leaves to supported
@@ -2186,7 +2184,7 @@ binary64 approximation. Tag 0 textual date-time, tag 1 epoch-based
 time, and byte-oriented UUID encodings have different representations.
 Their tag semantics, numeric range, and text or byte transformations
 MUST be evaluated individually. The identifier `time` in the CDDL
-prelude does not mean Core's RFC 3339 time-of-day type.
+prelude does not mean Core's {{RFC3339}} time-of-day type.
 
 ### Structures and Evaluation {#cddl-reverse-structure}
 
