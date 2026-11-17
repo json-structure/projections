@@ -13,15 +13,11 @@ Expires: 17 May 2027
 
 Abstract
 
-   JSON Structure defines a representation-neutral model for data
-   structures.  This document specifies projections of that model into
-   JSON Schema, Apache Avro, Protocol Buffers, XML Schema, and CDDL.
-   Each projection defines the target schema and the binding between
-   model values and the values accepted by a serializer for that schema.
-   It also specifies how definitions in those schema languages can be
-   imported into the JSON Structure model.  The mapping rules identify
-   which data, constraints, and type information are preserved and where
-   a projection is lossy.
+   This document projects the representation-neutral JSON Structure
+   model into JSON Schema, Apache Avro, Protocol Buffers, XML Schema,
+   and Concise Data Definition Language (CDDL).  It defines target
+   schemas, serializer value bindings, reverse imports, and conditions
+   for preserving values, constraints, and schema information.
 
 About This Document
 
@@ -95,9 +91,11 @@ Table of Contents
    5.  Apache Avro
      5.1.  JSON Structure to Avro
        5.1.1.  Primitive Types
-       5.1.2.  Logical Types
-       5.1.3.  Records, Optionality, and Collections
-       5.1.4.  Unions, Choices, and Enumerations
+       5.1.2.  Wide Integers
+       5.1.3.  Logical Types
+       5.1.4.  Records, Optionality, and Collections
+       5.1.5.  Unions, Choices, and Enumerations
+       5.1.6.  Extensible Values and Schema Evolution
      5.2.  Avro to JSON Structure
        5.2.1.  Types and Names
        5.2.2.  Logical Types and Resolution Metadata
@@ -148,52 +146,33 @@ Table of Contents
 
 1.  Introduction
 
-   JSON Structure [JSTRUCT-CORE] is the canonical definition model used
-   by this specification.  A data structure is defined once in JSON
-   Structure.  Its definition can then be projected into a schema
-   understood by the serializer for a selected representation.
+   JSON Structure [JSTRUCT-CORE] is intended as a representation-neutral
+   definition language.  Its schemas are written in JSON [RFC8259] and
+   include provisions for JSON serialization, but its data definitions
+   can be used independently of that representation.
 
-   For example, an application can hold an int64 value as a native
-   signed 64-bit integer.  Its Avro projection uses long, and an Avro
-   serializer encodes that value according to the projected schema.  Its
-   Protocol Buffers projection uses int64, and a Protocol Buffers
-   serializer applies that schema's field numbers and wire encoding.
+   JSON Structure serves as the canonical, abstract base model for data
+   definitions.  Data structures are defined in JSON Structure and
+   projected into programming languages, database schemas, and other
+   schema languages.  This document covers projections into formal
+   schema languages.
 
-   No intermediate JSON document is required.  The JSON Structure
-   definition is written in JSON [RFC8259], and Core specifies JSON
-   encodings for its types, but neither fact requires a non-JSON
-   representation to use JSON's carriers.  The decimal string used for
-   int64 in JSON is a serialization rule, not the abstract integer's
-   value or a requirement to use strings in Avro.
+   To serialize data in Avro, an application projects its JSON Structure
+   data definition into an Avro schema and uses an Avro serializer with
+   that schema.  The same approach applies to Protocol Buffers and the
+   other formats covered here: their schemas are projections of the data
+   model contained in the JSON Structure definition.  Reverse imports
+   recover JSON Structure definitions within the stated preservation
+   limits.
 
-   The same model can supply definitions for programming languages and
-   database schemas.  This document covers projections into formal
-   schema languages: JSON Schema [JSONSCHEMA-CORE]
-   [JSONSCHEMA-VALIDATION], Apache Avro [AVRO], Protocol Buffers
-   [PROTO2] [PROTO3], XML Schema [XSD-STRUCTURES] [XSD-DATATYPES], and
-   CDDL [RFC8610].  Programming-language and database projections are
-   outside its scope.
+   The targets are JSON Schema [JSONSCHEMA-CORE]
+   [JSONSCHEMA-VALIDATION], Avro [AVRO], Protocol Buffers [PROTO2]
+   [PROTO3], XML Schema (XSD) [XSD-STRUCTURES] [XSD-DATATYPES], and CDDL
+   [RFC8610].
 
-   Each target has its own type and serialization rules.  An Avro record
-   field is present even when its value is null.  A Protocol Buffers
-   repeated field does not distinguish absence from an empty collection.
-   XML content can have an order that a model object does not.  A
-   projection must account for these differences without silently
-   changing the canonical definition.
-
-   The outward projection is the primary operation.  The reverse rules
-   describe import into the canonical model, including the limits on
-   reconstructing definitions from a projected schema.  An imported
-   definition can then be used like any other JSON Structure definition.
-   Import does not make the foreign schema language an alternative
-   authority for the model.
-
-   This specification does not change JSON Structure Core.  It uses the
-   Validation [JSTRUCT-VALIDATION], Conditional Composition
-   [JSTRUCT-COMPOSITION], and Alternate Names [JSTRUCT-ALTNAMES]
-   extensions where their semantics apply.  Not every construct of a
-   foreign schema language has an exact model equivalent, and not every
-   model constraint has a native target equivalent.
+   The rules use Validation [JSTRUCT-VALIDATION], Conditional
+   Composition [JSTRUCT-COMPOSITION], and Alternate Names
+   [JSTRUCT-ALTNAMES] where needed.
 
 2.  Conventions
 
@@ -203,251 +182,158 @@ Table of Contents
    BCP 14 [RFC2119] [RFC8174] when, and only when, they appear in all
    capitals, as shown here.
 
-   The term _model_ identifies the data definitions expressed in JSON
-   Structure.  For an outward projection, the _source_ is that model and
-   the _target_ is the schema generated for the selected representation.
-   For an import, the source is the foreign schema and the target is its
-   JSON Structure definition.
+   The _model_ is the canonical data model defined by a JSON Structure
+   schema document.  A _projection_ maps that model into another schema
+   language. _Source_ and _target_ follow the conversion direction.  A
+   _binding_ maps model values to and from the serializer's data API.  A
+   _carrier_ holds a value lacking an equivalent target type.
+   Projection rules specify schema mappings, bindings, and preservation
+   limits.
 
-   A _binding_ specifies how model values and members are supplied to,
-   and recovered from, a serializer's data API.  A _carrier_ is the
-   target type used to hold a model value when the target has no
-   directly equivalent type.  A _projection_ consists of the schema
-   mapping, the binding, and a statement of constraints and information
-   that the target cannot express.
-
-   Unless stated otherwise, JSON Structure refers to the version
-   identified by the source or target $schema URI.  A processor MUST NOT
-   substitute the semantics of another version without reporting that
-   substitution.
+   The applicable Core version is identified by $schema.  A processor
+   MUST report any substitution of another version's semantics.
 
 3.  Projection and Preservation Model
 
 3.1.  Canonical Definitions and Serialization Bindings
 
-   An outward projection MUST derive its target types from the logical
-   types declared by the model.  It MUST NOT derive them from the JSON
-   token types used by one serialization of model instances.  In
-   particular:
+   A projection MUST specify target schemas and bindings from logical
+   types, not JSON tokens.  Decimals are exact base-10; binary values
+   are octets.
 
-   *  An int64 or uint64 is an integer value, even though its Core JSON
-      representation is a string.
+   Native types SHOULD be used when value-preserving.  Textual or
+   wrapped carriers require a target or serializer limitation, or an
+   explicit representation-preserving profile.  The reason and
+   consequences MUST be stated.  The model remains authoritative: a
+   binding or identified validator MUST enforce constraints absent from
+   the target when preservation is claimed.  Validation outside the
+   generated target schema is called _residual validation_.
 
-   *  A decimal is an exact base-10 numeric value.  Its JSON spelling
-      does not require a textual carrier where a suitable native decimal
-      exists.
-
-   *  A binary is an octet sequence.  Base64 [RFC4648] is one way of
-      serializing it, not the value to supply to a native byte-string
-      serializer.
-
-   *  Objects, tuples, maps, collections, and choices retain their model
-      structure even when the target represents them with different
-      constructs.
-
-   The projection MUST specify both the target schema and the
-   corresponding binding.  For Avro, that binding supplies Avro record
-   fields, union branches, and primitive values.  For Protocol Buffers,
-   it supplies message fields and presence states.  XML and CBOR
-   bindings likewise supply the target's structural and scalar values.
-
-   The target serializer remains responsible for producing the
-   representation defined by its format.  This specification does not
-   replace that serializer or require it to parse JSON Structure.  A
-   projection processor can generate both its schema and the application
-   bindings that connect the canonical model to its data API.
-
-   The canonical definition remains authoritative when the target cannot
-   express a constraint.  The binding or an identified validator MUST
-   enforce that constraint if preservation is claimed.  A wider target
-   carrier does not change the source model, but it does prevent a claim
-   that the target schema alone enforces that model.
-
-   Native target types SHOULD be used when they preserve the declared
-   value domain.  A textual or wrapped carrier is required only when the
-   target lacks a suitable type, the selected serializer cannot use it,
-   or an explicit representation-preserving profile requires that
-   carrier.  The reason and its preservation consequences MUST be
-   stated.
-
-   The Core JSON encoding rules apply when JSON is the selected
-   representation, including the JSON Schema projection and the CDDL
-   JSON profile.  They also apply at an explicitly selected JSON input
-   or output boundary.  They MUST NOT be imposed on an otherwise native
-   serialization binding.
+   Core JSON encodings apply only to selected JSON representations or
+   boundaries, including JSON Schema and the CDDL JSON profile.  They
+   MUST NOT be imposed on native bindings.
 
 3.2.  Instances and Value Equivalence
 
-   Let S be the set of valid source values and T the set of valid target
-   values.  Let E transform a source value into a target value and D
-   transform a projected target value back into a source value.  A
-   value-preserving projection requires that E be defined for every
-   value in S and that D(E(x)) equal x for every x in S.
+   Let S be the set of valid source values and T the set of target
+   values.  Encoding E maps S into T; decoding D maps target values back
+   to the source model.  Value preservation requires D(E(x)) = x for
+   every x in S.
 
-   Equality uses the source data model, before any serialization.
-   Object property order is not significant; array and tuple order is
-   significant.  Set equality is independent of element order.  An
-   absent property, a present property whose value is null, and a
-   present property whose value is an empty collection are distinct.
-   Integers and decimal values are compared exactly.  Binary values are
-   compared as octet sequences, not as Base64 characters.
+   Equality follows the source model: object and set order is
+   irrelevant; array and tuple order matters.  Absence, present null,
+   and present empty collections differ.  Numeric equality is exact;
+   binary equality compares octets; string equality compares characters.
 
-   For string, the sequence of characters is the value.  For an extended
-   type with a textual JSON encoding, its logical value and its lexical
-   spelling MUST be distinguished.  Decimal trailing zeroes and
-   equivalent binary-text encodings need not be reproduced unless
-   lexical preservation is explicitly requested.
+   Logical values MUST be distinguished from lexical spellings.
+   Trailing decimal zeroes, equivalent binary-text spellings, token
+   whitespace, XML prefixes, unordered schema members, and comments need
+   not survive unless lexical or source-file preservation is requested.
 
-   A temporal binding MUST identify whether it preserves a calendar
-   value, an offset-bearing value, or an instant.  If the canonical
-   definition requires an offset to remain observable, normalization to
-   an instant alone is value loss.  If an explicitly declared instant
-   profile treats equivalent offset representations as the same value,
-   UTC normalization is permitted.  That profile does not preserve the
-   original text.
-
-   Whitespace between JSON tokens, XML namespace prefix spelling, schema
-   member order where the language leaves it unordered, and comments are
-   not instance values.  Preserving values does not imply preserving a
-   particular serialization or the original source file.
+   Temporal bindings MUST identify calendar, offset-bearing, or instant
+   semantics.  Discarding an observable offset loses information.  An
+   explicit instant profile permits UTC normalization, without
+   preserving original text.
 
 3.3.  Independent Preservation Properties
 
-   This specification distinguishes the following properties:
+   Value preservation:  Every valid source value is reversible, even if
+      its carrier changes.
 
-   Value preservation:  Every valid model value has a reversible
-      representation in the target.  Binding a model integer to Avro
-      long preserves that value without requiring a JSON-string
-      conversion.  A wrapper or a tuple-to-record binding can also
-      preserve values while changing the target structure.
+   Constraint preservation:  The target schema accepts exactly the
+      encodings of valid source values, E(S), with no additional values.
+      Constraints checked only by an adapter are not native target-
+      schema constraints.
 
-   Constraint preservation:  The target admits exactly the transformed
-      source value set.  An otherwise reversible carrier is not
-      constraint-preserving if it also admits values that violate the
-      source schema.  Constraints supplied only by an adapter or a
-      separate validator are not native target-schema constraints.
+   Schema round-trip preservation:  Import recovers semantic
+      declarations: types, references, names, constraints, defaults, and
+      identities.  Claims MUST state required metadata.
 
-   Schema round-trip preservation:  Importing the result reconstructs
-      the source's type identities, references, names, constraints,
-      defaults, and other semantic declarations.  It need not
-      reconstruct formatting or comments.  The claim MUST identify
-      whether retained metadata is required.
-
-   A projection is _lossless_ without qualification only if all three
-   properties hold for the stated source subset and processing profile.
-   An implementation MUST qualify a claim that preserves only one or two
-   of them.
-
-   For example, int8 projected as an unrestricted Avro int preserves
-   each source value, but widens the accepted range.  Reversing the Avro
-   type alone cannot recover the original width.  This mapping is not an
-   unqualified lossless projection.
+   Unqualified _lossless_ requires all three for the stated subset and
+   profile.  Partial claims MUST be qualified.  For example, int8 in
+   unrestricted Avro int preserves values, widens constraints, and needs
+   metadata to recover width.
 
 3.4.  Processing Profiles and Diagnostics
 
-   A processor MUST identify the source dialect, the target dialect, the
-   selected root type or types, and the enabled extensions.  It MUST
-   distinguish a standalone target-schema result from a result that
-   requires an instance adapter, additional validation, or retained
-   metadata.
+   A processor MUST identify dialects, roots, extensions, and required
+   adapters, validators, or metadata.  Unmet lossless requests MUST
+   fail; explicitly enabled lossy projections MAY proceed.  Every
+   applicable loss MUST be reported at its affected source location.
+   Every loss diagnostic MUST identify source format and location,
+   target construct or omission reason, affected preservation property,
+   effect, and any remedy or source restriction.  Effects distinguish
+   widening (admitting additional values), narrowing (excluding source
+   values), value collapse (merging distinct values), representation
+   change, and schema loss.
 
-   When lossless projection is requested, a processor MUST reject a
-   source construct for which the requested preservation properties
-   cannot be met.  A processor MAY produce a lossy projection when that
-   behavior is explicitly enabled.  It MUST report every applicable loss
-   at the affected source location, rather than reporting only that a
-   file was converted.
-
-   Each diagnostic MUST identify:
-
-   *  The source format and source location.
-
-   *  The target construct or the reason that no target construct was
-      emitted.
-
-   *  The affected preservation property.
-
-   *  Whether the effect is domain widening, domain narrowing, value
-      collapse, a representation change, or loss of schema information.
-
-   *  Any restriction on source instances, required adapter behavior, or
-      retained metadata needed to avoid the loss.
-
-   An annotation that a normal target processor ignores MUST NOT be
-   reported as an enforced constraint.  A processor MUST NOT silently
-   substitute string, any, an empty schema, or a default value for an
-   unrecognized type or an unresolved reference.
-
-   This document specifies neither a command-line interface nor an
-   interchange format for diagnostics or companion metadata.  An
-   implementation-specific metadata channel MUST NOT be the basis for a
-   claim of interoperable schema round-trip preservation unless the
-   participating processors agree on that channel and its
-   interpretation.
+   Ignored annotations MUST NOT count as enforcement.  Unknown types and
+   unresolved references MUST NOT silently become permissive types or
+   defaults.  Diagnostic interfaces and metadata formats are
+   implementation-defined; interoperable round-trip claims MUST use an
+   agreed metadata channel and interpretation.
 
 3.5.  Roots, Namespaces, and References
 
-   A processor MUST select the effective JSON Structure root from the
-   root type or $root, as applicable.  A document containing only
-   definitions is a type library; it MUST NOT be converted into an
-   arbitrary instance root.  If the target requires one root, root
-   selection is an explicit projection input.
+   Processors MUST select root type or $root; definitions-only libraries
+   MUST NOT acquire arbitrary roots.  A target requiring one root needs
+   explicit selection.  References use {"type":{"$ref":"..."}}, or
+   {"$ref":"..."} inside union arrays.  Bare schema $ref and referenced
+   root type are invalid; referenced roots use $root.
 
-   JSON Structure references are represented as {"type":{"$ref":"..."}}.
-   A reference member inside a type-union array is {"$ref":"..."}. A
-   processor MUST NOT emit a bare $ref at a JSON Structure schema
-   location or place a reference in the root type; a referenced root
-   uses $root instead.
-
-   References MUST be resolved according to the source language before
-   names are rewritten.  JSON Pointer tokens MUST be escaped and
-   unescaped according to [RFC6901].  Rewriting a namespace separator
-   MUST NOT change reference identity or merge two declarations.
-
-   Recursive type graphs MUST be retained as references when the target
-   supports them.  A processor MUST NOT repeatedly inline a recursive
-   definition until a depth limit is reached and then substitute another
-   type.  Unsupported forms of recursion MUST be diagnosed.
-
-   External resources MAY be materialized as local definitions or
-   handled with the JSON Structure Import extension [JSTRUCT-IMPORT].
-   The chosen policy MUST retain resource identity and reference
-   resolution.  Merely copying an external $ref into JSON Structure Core
-   is not an import.
+   References MUST resolve before name rewriting, with JSON Pointer
+   escaping per [RFC6901] and identity preserved.  Supported recursion
+   MUST remain references; unsupported recursion MUST be diagnosed, not
+   depth-truncated.  External resources MAY be materialized or use
+   Import [JSTRUCT-IMPORT]; resource identity and resolution MUST
+   survive.
 
 3.6.  Names and Annotations
 
-   JSON Structure declaration and property identifiers conform to [A-Za-
-   z_][A-Za-z0-9_]*. Foreign names outside this syntax MUST be assigned
-   legal, distinct identifiers.  Case folding, removal of punctuation,
-   and replacement of namespace separators MUST NOT merge distinct
-   names.
+   Imported names MUST map to distinct legal JSON Structure identifiers
+   matching [A-Za-z_][A-Za-z0-9_]*. A declaration's altnames map MAY
+   retain names for other representations.  Its json entry gives the
+   JSON property name; avro, proto, xml, and cddl give format-specific
+   names.  A projection uses the entry for its target format.
 
-   When the Alternate Names extension is enabled, altnames.json
-   identifies the JSON property spelling.  Format-specific names MAY be
-   recorded under purpose indicators such as avro, proto, xml, and cddl.
-   The purpose indicator does not itself define an encoding or restore a
-   field number, XML node kind, or namespace URI.
+   For example, this schema gives the model property firstName different
+   JSON and Avro names:
 
-   The required and tuple keywords refer to JSON Structure declaration
-   keys, not their alternate JSON spellings.  A projection MUST rewrite
-   those references consistently.  Enumeration symbol mappings use
-   altenums where applicable; they MUST be one-to-one over the relevant
-   value set.
+   {
+     "$schema": "https://json-structure.org/meta/extended/v0/#",
+     "$id": "https://example.com/schemas/Person",
+     "$uses": ["JSONStructureAlternateNames"],
+     "name": "Person",
+     "type": "object",
+     "properties": {
+       "firstName": {
+         "type": "string",
+         "altnames": {
+           "json": "first-name",
+           "avro": "first_name"
+         }
+       }
+     },
+     "required": ["firstName"],
+     "additionalProperties": false
+   }
 
-   Descriptions SHOULD be copied to the target documentation facility.
-   Examples, units, currencies, localized descriptions, semantic
-   annotations, and unknown extension keywords have no implied
-   validation semantics in another language.  They MUST be retained in
-   an identified metadata channel or reported as lost.  A comment
-   containing a constraint is documentation, not enforcement.
+   The Avro record field is named first_name; the JSON property is
+   first-name.  The model's required array still names firstName.
+   Alternate names specify spelling, not encoding, field numbers, XML
+   node kinds, or namespace identity.  Target names MUST satisfy the
+   format's naming and uniqueness rules.
+
+   required and tuple name declaration keys; references MUST be
+   rewritten consistently. altenums mappings MUST be one-to-one.
+   Descriptions SHOULD be copied to target documentation.  Examples,
+   units, currencies, localized descriptions, semantic annotations, and
+   unknown extensions MUST be retained as metadata or reported lost.
 
 3.7.  Numeric and Textual Representations
 
-   JSON Structure integer is an alias for int32, not an unbounded
-   mathematical integer.  Signed integer types of width b have the
-   inclusive range -(2^(b-1)) through 2^(b-1)-1.  Unsigned types have
-   the inclusive range 0 through 2^b-1.
+   integer aliases int32.  A b-bit signed integer spans -(2^(b-1))
+   through 2^(b-1)-1; an unsigned integer spans 0 through 2^b-1.
 
    +=======+========================================+=======================================+
    |Type   |                                 Minimum|                                Maximum|
@@ -476,59 +362,31 @@ Table of Contents
 
                                   Table 1
 
-   When JSON is the selected representation, Core encodes integers
-   through uint32 as JSON numbers.  It encodes int64, uint64, int128,
-   uint128, and decimal as JSON strings.  These rules do not change
-   their logical numeric domains.
+   Core JSON uses numbers through uint32, strings for wider integers and
+   decimal, and encoded text such as Base64 [RFC4648] for octets.
+   Schema numeric constraints follow those representations but MUST be
+   applied numerically.  Signed integer strings match -?(0|[1-9][0-9]*),
+   unsigned strings (0|[1-9][0-9]*), over the entire string; bounds
+   remain additional.
 
-   Numeric validation keyword values in a JSON Structure schema follow
-   Core's JSON representation rules.  For example, an int64 bound is
-   written as a string in the schema, but a projection MUST apply that
-   bound numerically to a native target integer.
+   Core decimals require a fractional part.  Projections MUST apply
+   effective precision and scale, defaulting to 34 significant and 7
+   fractional digits.  These MUST be reconciled with target coefficient-
+   digit or fixed-scale rules.
 
-   An integer-string grammar is -?(0|[1-9][0-9]*) for signed values and
-   (0|[1-9][0-9]*) for unsigned values, with a match of the entire
-   string.  The relevant numeric bounds are additional requirements.  A
-   regular expression for digits alone does not impose a bit width.
-   Exponents, leading plus signs, and leading zeroes other than the
-   single zero are not accepted by this grammar.
+   Generic number MUST NOT be assumed binary64.  Floating conversion
+   preserves only exactly representable values; overflow, underflow, and
+   rounding lose values. float8 specifies no portable E4M3, E5M2, or
+   binary16 encoding; processors MUST NOT infer one.  Wider carriers
+   lose type identity.  Reverse projections MUST handle NaN, payloads,
+   and infinities separately.
 
-   For decimal, the JSON Structure grammar requires a fractional part.
-   The effective precision and scale are the declared values, or the
-   Core defaults of 34 significant digits and 7 fractional digits when
-   absent.  A projection MUST account for those defaults.  It MUST NOT
-   infer unlimited precision from an omitted precision, or a scale of
-   zero from an omitted scale.
-
-   A target fixed-scale decimal can count precision as digits in its
-   unscaled coefficient.  The source's significant-digit and fractional-
-   digit rules MUST be reconciled with that definition.  Matching
-   parameter names or equal parameter values alone do not prove equal
-   numeric domains.
-
-   The generic number type MUST NOT be assumed to have exactly the value
-   space of binary64.  Conversion of a JSON decimal-number value into a
-   binary floating-point carrier is value-preserving only when that
-   value has an exact representation in the carrier.  Overflow,
-   underflow, and rounding are losses, even when the receiving
-   application ordinarily accepts them.
-
-   The Core definition of float8 does not identify a portable
-   interchange bit encoding.  A processor MUST NOT infer an E4M3, E5M2,
-   or binary16 encoding from that name.  Widening its carrier does not
-   preserve its source type identity.  JSON representations do not carry
-   IEEE floating-point NaN payloads or infinities; a reverse projection
-   MUST address those values separately.
-
-   String-length limits, decoded binary lengths, numeric precision, and
-   encoded byte lengths are different quantities.  A processor MUST NOT
-   substitute one for another merely because a target keyword is named
-   length or size.
+   Character lengths, decoded octet lengths, encoded byte lengths, and
+   numeric precision MUST NOT be interchanged.
 
 3.8.  Presence, Defaults, and Composition
 
-   For an object property with non-null value type T, the four cases
-   are:
+   For non-null T:
 
          +================+=====================================+
          | Declaration    | Permitted states                    |
@@ -546,54 +404,38 @@ Table of Contents
 
                                  Table 2
 
-   These cases MUST NOT be conflated. default does not inherently change
-   a type's nullability.  A source language's default application rules
-   MUST be examined separately from the allowed value set.
+   Presence states MUST remain distinct.  Default application MUST be
+   evaluated separately; defaults do not imply nullability.
 
-   JSON Structure non-discriminated unions select the first matching
-   member.  A target union that validates the same values but loses
-   branch identity is not necessarily schema round-trip preserving.  A
-   target exclusivity operator MUST NOT replace an inclusive union
-   unless the alternatives are disjoint.
+   Core unions select the first matching member when several members
+   accept a value.  Losing that branch identity affects round trips.  An
+   inclusive union accepts any matching branch; an exclusive union
+   requires exactly one match.  Inclusive unions MUST NOT become
+   exclusive unless disjoint.  Alternative required sets mean exactly
+   one complete set; projections MUST preserve this condition, not
+   flatten the sets.
 
-   JSON Structure required can contain alternative sets.  Exactly one
-   complete set must match.  A projection MUST NOT flatten these
-   alternatives into their union or intersection.  A target lacking this
-   condition needs an equivalent choice construction, additional
-   validation, or a loss diagnostic.
-
-   Inheritance through $extends and applied add-ins MUST be evaluated
-   using their source semantics.  A structural projection MAY
-   materialize the resulting properties.  It MUST first apply Core's
-   ordered base-property precedence: when several bases define the same
-   property, the first base in the array takes precedence.  A derived
-   declaration MUST NOT redefine an inherited property.  Constraints
-   that the source composition rules combine conjunctively MUST remain
-   conjunctions; that rule MUST NOT replace Core's property-precedence
-   rule.  Loss of abstractness, inheritance identity, or add-in identity
-   MUST be reported when the target cannot express those declarations.
+   Materialization expands inherited declarations into explicit
+   properties.  Inheritance and add-ins MUST follow source semantics.
+   Materialization MAY be used after Core's first-base-wins property
+   precedence.  Derived properties MUST NOT redefine inherited
+   properties.  Conjunctive constraints MUST remain conjunctive without
+   replacing that precedence.  Unrepresentable abstractness,
+   inheritance, or add-in identity MUST be reported.
 
 4.  JSON Schema
 
-   This section specifies JSON Schema Draft 2020-12.  Earlier drafts
-   require an explicit dialect normalization step.  In particular,
-   Draft-07 tuple-form items, additionalItems, definitions, and boolean
-   exclusiveMinimum from older dialects MUST NOT be interpreted as their
-   2020-12 counterparts without that normalization.
-
-   JSON Schema is the projection for validating the model's JSON
-   representation.  It therefore uses Core's JSON encoding rules, unlike
-   a native Avro or Protocol Buffers binding.  A JSON validation schema
-   can preserve the encoded value set while losing model distinctions
-   such as integer width, tuple member names, or named type identity.
+   This projection validates Core JSON representations using Draft
+   2020-12.  Earlier dialects MUST be normalized, including Draft-07
+   tuple items, additionalItems, definitions, and older boolean
+   exclusiveMinimum.
 
 4.1.  JSON Structure to JSON Schema
 
 4.1.1.  Primitive Types
 
-   The target document MUST identify the 2020-12 dialect with $schema.
-   The following table describes the base mapping; constraints and
-   qualifications in the surrounding text are part of the mapping.
+   Targets MUST identify the 2020-12 $schema.  Table mappings include
+   the qualifications below.
 
     +==============================+=================================+
     | JSON Structure type          | JSON Schema representation      |
@@ -641,265 +483,139 @@ Table of Contents
 
                                  Table 3
 
-   The integer-string and decimal-string mappings preserve the existing
-   JSON representation.  JSON Schema numeric minimum, maximum, and
-   multipleOf do not apply to a string.  A processor MUST NOT copy a
-   string-valued JSON Structure numeric bound into one of those JSON
-   Schema numeric keywords.
+   Numeric keywords do not constrain strings; string-valued bounds MUST
+   NOT be copied into them.  Integer-string ranges MAY use exact regular
+   expressions; otherwise their bounds MUST be retained for additional
+   validation and native widening reported.  Decimal grammar, precision,
+   scale, and bounds require equivalent enforcement.  A numeric carrier
+   is a separate instance-transforming profile.
 
-   A processor MAY generate a regular expression that recognizes the
-   exact bounded integer-string language.  Otherwise, it MUST retain the
-   range for additional validation and report native constraint
-   widening.  For example, "18446744073709551616" matches an unsigned
-   digit-string expression but is outside uint64.
+   By default, format is an annotation; its presence does not require a
+   validator to check that format.  Extended types need an agreed
+   assertion profile or equivalent constraints; otherwise their domains
+   widen. uri-reference preserves Core's relative references; uri
+   excludes them.
 
-   The same rule applies to decimal precision, scale, and numeric
-   bounds.  A grammar expression alone is not an equivalent decimal
-   constraint.  Conversion to JSON Schema number is an alternative
-   instance-transforming profile, not the representation-preserving
-   mapping in this table.
-
-   JSON Schema format is an annotation under its default 2020-12
-   dialect.  Exact preservation of an extended string type requires an
-   agreed format-assertion profile or an equivalent assertion.  Without
-   it, the target is constraint-widening. uri-reference is used because
-   JSON Structure uri permits relative references; uri would incorrectly
-   narrow that domain.
-
-   The content vocabulary also does not require decoding or validating
-   an encoded string.  Merely emitting contentEncoding: "base64" does
-   not reject invalid Base64.  The Core default encoding for binary MUST
-   be made explicit when the target would otherwise omit it.
-   contentCompression has no standard 2020-12 equivalent and requires
-   retained metadata or a loss diagnostic.
+   Content annotations do not require decoding or validation.  Core's
+   default binary encoding MUST be explicit. contentCompression requires
+   metadata or a loss report.
 
 4.1.2.  Objects, Maps, and Collections
 
-   An object maps to JSON Schema object.  Declared property names, after
-   applying any JSON alternate names, become the keys of properties.
-   The property schemas are projected recursively.  Ordinary required
-   arrays are copied with the same name mapping.
+   Objects recursively map properties and required using JSON alternate
+   names.  Effective additionalProperties MUST be explicit, including
+   version-defined defaults and recursively projected schema values.
+   Alternative required sets MUST add oneOf branches {"required": Ri} to
+   the common object schema.  Ri denotes one alternative set of required
+   property names.
 
-   The effective additionalProperties policy MUST be emitted explicitly.
-   A source omission MUST be evaluated under the referenced JSON
-   Structure version and MUST NOT be assumed to mean a closed object.  A
-   schema-valued additionalProperties is projected recursively.
+   Maps use object without declared properties and projected values as
+   additionalProperties. keyNames becomes propertyNames; patternKeys
+   becomes patternProperties only with equivalent additional-property
+   behavior.
 
-   For alternative required sets R1 through Rn, the target MUST use
-   oneOf with one branch {"required": Ri} per set, in addition to the
-   common object schema.  This implements the exactly-one-complete-set
-   condition.  It MUST NOT require every property in the union of those
-   sets.
-
-   A map maps to an object with the projected values schema in
-   additionalProperties and no declared properties. keyNames maps to
-   propertyNames; patternKeys maps to patternProperties only where their
-   interaction with the additional-property policy is equivalent.
-
-   An array maps to array with a single projected items schema.  A set
-   maps to the same form with uniqueItems: true.  This preserves
-   uniqueness under JSON equality; it does not make JSON array order
-   unobservable to applications.
-
-   A tuple maps to an array with prefixItems in the exact order named by
-   tuple.  For length n, the target MUST contain minItems: n, maxItems:
-   n, and items: false.  Tuple property names have no native positional
-   equivalent and require retained metadata for schema round trips.
-   Emitting only prefixItems would permit shorter and longer arrays.
+   Arrays project items; sets add uniqueItems: true, without suppressing
+   observable JSON array order.  Tuples use prefixItems in tuple order
+   and MUST set minItems: n, maxItems: n, and items: false.  Names need
+   metadata.
 
 4.1.3.  Unions and Choices
 
-   A JSON Structure type union maps to anyOf, with one projected schema
-   per member.  A JSON Schema type array MAY be used only when it
-   expresses the same alternatives and carries no member-specific
-   restrictions.  Branch order SHOULD be retained, but ordinary JSON
-   Schema validation does not assign a first-match application type.
-   This is a schema-information loss when alternatives overlap.
+   Unions use anyOf.  Equivalent unrestricted alternatives MAY use a
+   type array.  Branch order SHOULD survive; JSON Schema validation does
+   not assign Core's first-match identity.
 
-   A tagged choice maps to oneOf of closed single-property objects.  For
-   each choice named k with projected value schema V, the branch
-   contains properties: {k: V}, required: [k], and additionalProperties:
-   false.  The key k is the tag, not a property to be added beside the
-   selected value.
-
-   An inline choice maps to oneOf of the materialized object
-   alternatives.  Each alternative MUST require the selector property
-   and constrain it to the corresponding choice name with const.  Base
-   properties and branch properties MUST be combined before any closed-
-   object restriction is applied.  Putting a closed base object beside a
-   derived object in allOf can reject valid derived properties and is
-   not an equivalent inheritance mapping.
+   Tagged choices use oneOf branches with properties: {k: V}, required:
+   [k], and additionalProperties: false.  Inline choices use
+   materialized alternatives; each MUST require its selector and
+   constrain it with const.  Base and branch properties MUST be combined
+   before closure.
 
 4.1.4.  Constraints, Definitions, and Defaults
 
-   The following validation keywords map directly when they have the
-   same applicability, value representation, and evaluation semantics:
-   minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
-   minLength, maxLength, pattern, minItems, maxItems, uniqueItems,
-   contains, minContains, maxContains, minProperties, maxProperties,
-   dependentRequired, and propertyNames.
+   These keywords map directly only with matching applicability,
+   representation, and evaluation: minimum, maximum, exclusiveMinimum,
+   exclusiveMaximum, multipleOf, minLength, maxLength, pattern,
+   minItems, maxItems, uniqueItems, contains, minContains, maxContains,
+   minProperties, maxProperties, dependentRequired, and propertyNames.
 
-   For maps, minEntries and maxEntries map to minProperties and
-   maxProperties.  Applicable const and enum values are preserved in
-   their JSON representations.  Constraints MUST be intersected with the
-   source type's intrinsic domain, not replace that domain.
+   Map entry bounds become property bounds; const and enum retain JSON
+   values.  Constraints MUST intersect intrinsic type domains.
+   Conditional Composition MAY use corresponding allOf, anyOf, oneOf,
+   not, if, then, and else with recursively equivalent evaluation.
 
-   Conditional Composition keywords MAY be projected as the
-   corresponding allOf, anyOf, oneOf, not, if, then, and else when each
-   enclosed rule is converted and its evaluation semantics are
-   preserved.  Equal keyword spelling is not proof of equivalence.
+   Definitions become uniquely keyed $defs; processors MUST rewrite
+   references and MUST NOT emit namespace-only objects as unconstrained
+   definitions. $root becomes $ref; $id survives when resource identity
+   remains valid. name MAY supply title, not type identity; descriptions
+   map directly. $uses, $offers, abstractness, and namespaces need
+   metadata.
 
-   JSON Structure definitions become $defs.  Namespace objects that do
-   not declare a type MUST NOT be emitted as unconstrained JSON Schema
-   definitions.  The processor MUST assign a unique target definition
-   key to each type and rewrite all references using the resulting
-   correspondence.  A JSON Structure $root becomes a JSON Schema $ref to
-   the projected definition. $id is preserved when its resource identity
-   remains valid.
-
-   JSON Structure name MAY supply JSON Schema title, and description
-   maps to description. title does not establish a named type. $uses,
-   $offers, abstractness, and source namespace identity have no
-   equivalent declaration in JSON Schema Core.
-
-   JSON Schema default is an annotation and does not fill in missing
-   values.  The JSON Structure Validation default rule supplies a value
-   for a missing property.  Copying that value into JSON Schema default
-   preserves the annotation but not the default-application behavior.
-   The difference MUST be reported or supplied by an explicitly declared
-   adapter.
+   JSON Schema default annotates; Validation defaults fill missing
+   properties.  This behavioral difference MUST be reported or
+   implemented by a declared adapter.
 
 4.2.  JSON Schema to JSON Structure
 
 4.2.1.  Primitive and Numeric Inference
 
-   JSON Schema null, boolean, string, and number map to the identically
-   named JSON Structure types.  JSON Schema integer MUST NOT map
-   unconditionally to JSON Structure integer, since the latter is
-   bounded to 32 signed bits.
+   null, boolean, string, and number map directly.  Integer import MUST
+   compute the effective domain, select a containing Core type, and
+   retain narrower constraints.  Wide types change JSON numbers to
+   strings.  Domains outside all Core integer types MUST be rejected in
+   constraint-preserving Core-only requests; other profiles can use an
+   explicit numeric-text adapter.
 
-   For an integer schema, a processor MUST determine the effective
-   integer domain after all applicable numeric restrictions.  It MAY
-   choose a bounded JSON Structure integer type only if that type
-   contains the complete domain.  It MUST retain any narrower source
-   restrictions.  Choosing int64 or a larger type changes JSON numbers
-   into JSON strings and requires an instance transformation.
-
-   An integer domain with no finite bound that fits a Core integer type
-   has no equivalent Core integer declaration.  A processor MUST reject
-   a constraint-preserving Core-only request.  A string carrier with an
-   explicitly defined numeric adapter is possible, but it does not
-   retain a native unbounded integer type.  Using number alone loses the
-   integer constraint.
-
-   JSON Schema treats numbers such as 1, 1.0, and 1e0 as integers when
-   their mathematical values are integral.  Core integer JSON syntax
-   excludes a decimal point.  JSON Schema validators ordinarily operate
-   on parsed values and do not enforce the original token spelling.  A
-   processor MUST distinguish value-set preservation from preservation
-   of lexical input restrictions.
-
-   A numeric format, including int64, float, or double, is not a
-   standard assertion of those domains in 2020-12.  It MUST NOT
-   independently justify narrowing a source number or changing its JSON
-   representation.
-
-   Standard string formats MAY map to the corresponding extended type
-   only when they are asserted by the source processing profile and
-   their domains agree with Core.  An unasserted format remains a string
-   annotation. format: "uri" denotes a narrower domain than Core uri;
-   the absolute URI restriction MUST be retained.  An assertion of uri-
-   reference matches the Core URI-reference domain.
-
-   Digit-string patterns alone do not identify a signed width, unsigned
-   width, or decimal precision.  A string containing digits MUST remain
-   a string unless the source declares the additional numeric
-   interpretation.
+   Integral 1, 1.0, and 1e0 satisfy JSON Schema integer validation.
+   Processors MUST distinguish parsed-value preservation from Core's
+   lexical integer restrictions.  Numeric formats MUST NOT independently
+   justify narrowing or representation changes.  String formats MAY
+   select extended types only when asserted and domain-compatible;
+   otherwise they remain annotations.  Absolute uri restrictions MUST
+   survive.  Digit strings MUST remain strings without declared numeric
+   semantics.
 
 4.2.2.  Structural Mapping
 
-   An object with explicitly declared properties maps to object with
-   recursively projected property schemas.  A purely dynamic object maps
-   to map with the applicable value schema.  An unconstrained object
-   maps to a map of any, not an object with no property declarations,
-   since Core objects require at least one declared property.
+   Declared properties become an object; dynamic objects become maps.
+   Unconstrained objects use map-of-any.  An object that permits no
+   properties, whose only value is {}, uses Validation maxEntries: 0,
+   not null.  Undeclared required names need any declarations plus
+   applicable pattern and additional-property constraints.
 
-   A closed object admitting only {} can be represented as a map of any
-   with maxEntries: 0 under the Validation extension.  It MUST NOT be
-   turned into null or into an unconstrained object.
+   JSON Schema excludes pattern-matched keys from additionalProperties;
+   Core patterns do not declare properties.  Processors MUST construct
+   equivalent key/value rules or diagnose unsupported combinations.
+   Multiple pattern matches intersect.
 
-   A JSON Schema required name not listed in properties requires an
-   explicit any property declaration in the JSON Structure object,
-   together with all applicable pattern and additional-property
-   restrictions.  Merely copying the required array can produce an
-   invalid Core schema.
-
-   additionalProperties in JSON Schema applies only to keys matched by
-   neither properties nor patternProperties.  JSON Structure validation
-   patterns do not themselves declare properties.  Therefore a processor
-   MUST NOT blindly copy patternProperties and a restrictive
-   additionalProperties together.  It MUST construct equivalent key-
-   domain and value constraints, or diagnose the unmatched combination
-   as unsupported.  Multiple matching patterns apply conjunctively;
-   choosing one match loses constraints.
-
-   A homogeneous array maps to array.  For a value-preserving import,
-   uniqueItems: true remains an array with the Validation uniqueness
-   constraint.  It MAY become a set only under an explicitly order-
-   discarding profile: [1,2] and [2,1] then become the same model value.
-   That change is value collapse as well as loss of the ordered-array
-   type.
-
-   A prefixItems array maps to a fixed tuple only if the schema requires
-   exactly that length and forbids a tail.  Positional names MUST be
-   assigned or recovered from retained metadata.  A variable-length
-   prefix, an optional suffix, or a differently typed tail is not a
-   fixed tuple.  A processor MUST retain its rules using an equivalent
-   supported composition or reject that structural projection; it MUST
-   NOT silently fix the length.
+   Homogeneous arrays remain arrays, retaining uniqueness constraints.
+   Conversion to sets MAY occur only under an explicit order-discarding,
+   value-collapsing profile. prefixItems becomes a tuple only with exact
+   length and no tail; names MUST be generated or recovered.  Other
+   prefixes MUST retain equivalent rules or be rejected, not fixed-
+   length by assumption.
 
 4.2.3.  Composition and Unsupported Evaluation Features
 
-   An unconstrained schema, including true, maps to any. false has no
-   Core type.  Under Conditional Composition, it can be represented as
-   {"type":"any","not":{"type":"any"}}. Without that extension, a false
-   schema requires rejection rather than a permissive fallback.
+   true becomes any; false requires rejection or Conditional Composition
+   {"type":"any","not":{"type":"any"}}. Missing type MUST preserve
+   category-specific keyword applicability and unconstrained categories.
 
-   A source schema without type does not mean string.  Its keywords
-   apply only to the appropriate JSON categories and may leave other
-   categories unconstrained.  The processor MUST preserve that behavior,
-   for example by using an any-based rule set under Conditional
-   Composition.
-
-   An anyOf MAY become a type union when all branches are type
-   declarations and first-match type selection introduces no additional
-   observable distinction. oneOf MUST NOT become an inclusive union
-   unless branches are disjoint.  Recognizing the alternative-required-
-   set form described in Section 4.1.2 permits the corresponding Core
-   required alternatives.
-
-   An allOf MUST NOT be implemented by overwriting properties from
-   earlier branches.  Conflicting bounds and incompatible types remain
-   intersections, including unsatisfiable intersections.  A structural
-   merge is permitted only after proving equivalence.
+   anyOf MAY become a type union when all branches declare types and
+   selection adds no observable distinction. oneOf needs disjointness
+   for inclusive conversion; required-set forms follow Section 4.1.2.
+   allOf MUST retain intersections, including contradictions; structural
+   merging requires equivalence, never property overwrites.
 
    $dynamicRef, $dynamicAnchor, unevaluatedProperties, and
-   unevaluatedItems depend on resource or evaluation context that is not
-   expressed by a Core type reference.  They have no direct mapping
-   defined here.  A processor MUST resolve them by a semantics-
-   preserving transformation for the selected schema graph or reject
-   them in a lossless request.  Discarding them is a reported lossy
-   projection.
-
-   References, anchors, nested $id resources, and vocabularies MUST be
-   resolved before conversion to local Core definitions.  Unknown
-   required vocabularies prevent a claim that the source semantics are
-   understood.
+   unevaluatedItems MUST be transformed equivalently for the selected
+   graph or rejected in lossless mode.  References, anchors, nested $id,
+   and vocabularies MUST resolve before conversion.  Unknown required
+   vocabularies prevent lossless claims.
 
 4.3.  Example and Preservation Boundary
 
-   The following complete JSON Structure document describes a closed
-   object:
+   This closed object:
 
    {
      "$schema": "https://json-structure.org/meta/core/v0/#",
@@ -915,7 +631,7 @@ Table of Contents
      "additionalProperties": false
    }
 
-   Its JSON Schema projection preserves instance shape:
+   projects to:
 
    {
      "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -931,31 +647,15 @@ Table of Contents
      "additionalProperties": false
    }
 
-   The absent note, note: null, and a textual note remain distinct.  The
-   values and numeric bounds are preserved.  Reversing this document can
-   recover uint8 under a declared narrowest-range inference policy, but
-   the schema alone cannot prove whether the source was a uint8 or a
-   constrained int32.  The original application type identity needs
-   retained metadata.
-
-   The native lossless subset excludes unasserted extended formats,
-   unenforced string-encoded numeric constraints, unsupported evaluation
-   features, and source default-application behavior.  Exact type-
-   identity round trips further require preservation of source names and
-   type annotations where JSON Schema has no corresponding declaration.
+   Presence and bounds survive; recovering original width requires
+   metadata.
 
 5.  Apache Avro
 
-   This section specifies the Avro 1.12.0 schema language [AVRO], rather
-   than an implementation-specific extension to it.  An Avro protocol's
-   RPC messages, object-container compression, and schema-registry
-   identifiers are outside the type projection.
-
-   Avro permits a primitive, array, map, or union at its schema root.  A
-   processor MUST NOT introduce a record solely on the assumption that
-   Avro requires every root to be a record.  If a surrounding system has
-   that restriction, the wrapper is a separate, declared processing
-   profile.
+   This section uses Avro 1.12.0 [AVRO], excluding remote procedure
+   calls, container compression, and registry identifiers.  Non-record
+   roots are legal; wrappers for surrounding-system restrictions MUST be
+   separately declared.
 
 5.1.  JSON Structure to Avro
 
@@ -987,9 +687,17 @@ Table of Contents
    | int64        | long                        | Native signed 64-bit |
    |              |                             | integer              |
    +--------------+-----------------------------+----------------------+
-   | uint64,      | string                      | Exact decimal-       |
-   | int128,      |                             | integer carrier with |
-   | uint128      |                             | numeric validation   |
+   | uint64       | bytes with logicalType:     | Precision 20, scale  |
+   |              | "decimal"                   | 0; retain unsigned   |
+   |              |                             | 64-bit bounds        |
+   +--------------+-----------------------------+----------------------+
+   | int128       | bytes with logicalType:     | Precision 39, scale  |
+   |              | "decimal"                   | 0; retain signed     |
+   |              |                             | 128-bit bounds       |
+   +--------------+-----------------------------+----------------------+
+   | uint128      | bytes with logicalType:     | Precision 39, scale  |
+   |              | "decimal"                   | 0; retain unsigned   |
+   |              |                             | 128-bit bounds       |
    +--------------+-----------------------------+----------------------+
    | float8,      | float                       | Exact-value and      |
    | float        |                             | source-domain        |
@@ -1029,103 +737,107 @@ Table of Contents
    |              |                             | additional           |
    |              |                             | validation           |
    +--------------+-----------------------------+----------------------+
-   | any          | An explicit JSON-value      | No native            |
-   |              | carrier, such as a JSON     | unconstrained Avro   |
-   |              | text in string              | value                |
+   | any          | A generic reader union      | A concrete writer    |
+   |              | with an extensible          | schema supplies      |
+   |              | named record                | extensions; see      |
+   |              |                             | Section 5.1.6        |
    +--------------+-----------------------------+----------------------+
 
                                   Table 4
 
-   Unrestricted uint64 MUST NOT be mapped to Avro long: the latter
-   cannot represent 9223372036854775808 through 18446744073709551615.
-   An explicitly range-restricted source MAY use long if every source
-   value fits.  Avro has no unsigned primitive and no 128-bit integer
-   primitive.
+   uint64 MUST NOT use long unless an explicit restricted profile fits
+   its signed range.  Wide integers use Section 5.1.2.
 
-   For an explicitly selected JSON-text any carrier, the carrier
-   contains a complete JSON text, including quotes when the value is a
-   string.  It is not a call to a host language's generic string
-   conversion.  The binding MUST preserve arbitrary model number values
-   without binary64 rounding.  An unrestricted Avro string admits non-
-   JSON text, so this carrier is not natively constraint-preserving.
+5.1.2.  Wide Integers
 
-5.1.2.  Logical Types
+   The standard projection MUST use decimal on bytes, scale 0, precision
+   20 for uint64 and 39 for either 128-bit type.  The exact integer is
+   the unscaled coefficient: signed big-endian two's complement,
+   including a leading zero octet when needed for a positive value.
+   Avro supplies the byte-count prefix.
 
-   Avro logical types MUST be placed on their specified underlying
-   types.  In particular, standard decimal annotates bytes or fixed, not
-   string; date annotates int; time-millis annotates int; and timestamp
-   logical types annotate long.  An unknown logical-type name is ignored
-   by ordinary Avro readers and does not supply a constraint.
+   {
+     "type": "record",
+     "name": "WideIntegers",
+     "namespace": "example",
+     "fields": [
+       {
+         "name": "unsigned64",
+         "type": {
+           "type": "bytes", "logicalType": "decimal",
+           "precision": 20, "scale": 0
+         }
+       },
+       {
+         "name": "signed128",
+         "type": {
+           "type": "bytes", "logicalType": "decimal",
+           "precision": 39, "scale": 0
+         }
+       },
+       {
+         "name": "unsigned128",
+         "type": {
+           "type": "bytes", "logicalType": "decimal",
+           "precision": 39, "scale": 0
+         }
+       }
+     ]
+   }
 
-   The native decimal binding uses Avro decimal.  For target precision p
-   and scale s, the logical value is unscaled times 10^(-s).  The
-   unscaled value is a signed two's-complement integer in big-endian
-   byte order.  The projection MUST derive p and s from the effective
-   model constraints, require 0 <= s <= p and p > 0, and determine
-   whether the resulting domains agree.
+   A declared fixed profile MAY substitute at least 9 octets for
+   precision 20 or 17 for precision 39.  A 16-octet precision-39
+   declaration is invalid.  Bindings or validators MUST enforce original
+   bounds, including unsigned non-negativity.  Unsupported precision
+   MUST fail, not round, truncate, or pass through binary64.
+   Reconstruction MUST retain integer identity and bounds; decimal
+   parameters cannot distinguish the two 128-bit types.
 
-   The binding MUST NOT round model values to fit the target.  If a
-   compatible fixed-scale domain cannot be established, the projection
-   MUST use an explicitly described alternative carrier or reject the
-   lossless native-decimal request.  A decimal-text string carrier is
-   one alternative; it needs separate enforcement of numeric semantics.
+5.1.3.  Logical Types
 
-   For fixed of n octets, the maximum supported decimal precision is
-   floor(log10(2^(8*n-1)-1)).  A processor MUST choose a sufficiently
-   large size or use bytes.  Padding and sign extension MUST follow
-   Avro.  Converting back to Core decimal MUST produce its required
-   fractional part, including a .0 when the selected scale is zero.
-   Native decimal does not preserve distinct lexical spellings such as
-   trailing zeroes.
+   Logical types MUST use their specified carriers: decimal on bytes/
+   fixed, date and time-millis on int, timestamps on long.  Unknown
+   annotations are ignored by ordinary readers.
 
-   The native temporal alternatives have the following boundaries:
+   An Avro decimal has precision p and scale s; its value is coefficient
+   times 10^(-s).  Projections MUST derive compatible p > 0 and 0 <= s
+   <= p from effective source constraints, without rounding; otherwise
+   they MUST declare an alternative carrier or reject lossless native
+   conversion.  Decimal text needs numeric validation.
 
-   *  date stores signed days from 1970-01-01.  Only dates representable
-      by both the source calendar syntax and that day count can be
-      projected.
+   For n-octet fixed, precision cannot exceed floor(log10(2^(8*n-1)-1)).
+   Size, padding, and sign extension MUST conform.  Core decimal output
+   MUST restore a fractional part, including .0 at scale zero; lexical
+   zeroes need not survive.
 
-   *  time-millis and time-micros store time since midnight without a
-      zone offset.  Core time uses RFC 3339 full-time, which contains an
-      offset.  Removing the offset or truncating fractions is lossy.
+   *  date: signed days since 1970-01-01, within both calendar domains.
 
-   *  timestamp-millis, timestamp-micros, and timestamp-nanos store
-      signed counts from the Unix epoch.  An adapter MUST check range,
-      fractional precision, and leap-second handling.  They preserve an
-      instant only under the declared time policy, not the original
-      offset and text.
+   *  time-millis/time-micros: offset-free time since midnight; Core
+      full-time has an offset.  Dropped offsets or fractions are losses.
 
-   *  local-timestamp-millis, local-timestamp-micros, and local-
-      timestamp-nanos do not identify a time zone.  They MUST NOT be
-      interpreted as a UTC datetime by assumption.
+   *  timestamp-millis/timestamp-micros/timestamp-nanos: signed epoch
+      counts.  Bindings MUST check range, precision, and leap seconds
+      under a declared instant policy; original offsets and text do not
+      survive.
 
-   *  duration uses a 12-octet fixed value containing unsigned little-
-      endian 32-bit month, day, and millisecond components.  It is not a
-      signed count of milliseconds and is not interchangeable with every
-      textual Core duration.
+   *  local-timestamp-millis/local-timestamp-micros/local-timestamp-
+      nanos: no zone; UTC MUST NOT be assumed.
 
-   When the model's temporal domain does not match an Avro logical type,
-   a component record or a temporal-text string carrier can be selected.
-   The binding MUST identify which model components it preserves.  A
-   temporal-text carrier does not cause standard Avro processors to
-   validate its syntax.  Requiring such a carrier is a target
-   limitation, not a requirement inherited from Core's JSON encoding.
+   *  duration: unsigned little-endian uint32 months, days, and
+      milliseconds in 12 octets, not a general signed duration.
 
-5.1.3.  Records, Optionality, and Collections
+   Unmatched temporal bindings MUST identify preserved components and
+   validate temporal text.
 
-   A JSON Structure object maps to an Avro record.  Each declared
-   property maps to a field.  Namespaces map to Avro namespaces without
-   merging declarations.  Recursive named records remain named
-   references and MUST be defined in a legal Avro name-resolution order.
+5.1.4.  Records, Optionality, and Collections
 
-   Avro records have a declared field set; they have no
-   additionalProperties facility.  A closed source object maps directly.
-   An open object requires a separate map field for extra properties and
-   a rule excluding collisions with declared fields.  That rule is not
-   an Avro record constraint.  Dropping extra properties is value loss,
-   not merely loss of an annotation.
+   Objects become records, properties become fields, and namespaces
+   remain distinct.  Recursive records MUST follow legal Avro definition
+   order.  Open objects need an extra-properties map with externally
+   enforced collision exclusion; Avro records have no
+   additionalProperties.
 
-   Every Avro record field has a value.  The following mapping
-   distinguishes the four source presence cases for non-null T:
+   Every field has a value.  For non-null T:
 
    +=================+================================================+
    | Source property | Avro field representation                      |
@@ -1143,177 +855,188 @@ Table of Contents
 
                                  Table 5
 
-   For the last row, the outer null represents absence; a present
-   wrapper whose value is null represents an explicitly present null.
-   The wrapper name MUST be unique.  For both optional cases, a field
-   default of null MAY be emitted with null as the first union branch.
+   In the last row, outer null means absence.  A present record whose
+   value is null means present null.
 
-   Using a single ["null", T] field for an optional nullable property
-   collapses two source states and MUST be diagnosed as value loss.
-   Using null for absence in an optional non-nullable property is
-   reversible only when the reverse adapter knows that null means
-   absence.  The native schema alone cannot distinguish that source from
-   a required nullable property.
+   Wrapper names MUST be unique.  Optional fields MAY default to null
+   with null first.  Optional-nullable flattening to ["null", T] MUST
+   report value collapse; other null-as-absence bindings require source
+   correspondence.
 
-   An array maps to Avro array with projected items.  A map maps to Avro
-   map with projected values; both languages use string keys.  A set
-   uses the array carrier, but Avro does not enforce uniqueness.
-   Collection-length bounds also need additional validation.
+   Arrays and string-keyed maps project recursively.  Sets use arrays
+   with external uniqueness; collection bounds need validation.  Tuples
+   use fields in tuple order; names and order MUST survive, without
+   inferring object identity.
 
-   A tuple maps to a record with one field per tuple property, in the
-   exact tuple order.  Its instance adapter converts array positions to
-   fields.  The tuple names and order MUST be retained for reversal; the
-   result MUST NOT be inferred to be an ordinary source object merely
-   because Avro uses a record.
+5.1.5.  Unions, Choices, and Enumerations
 
-5.1.4.  Unions, Choices, and Enumerations
+   Direct nested unions and duplicate unnamed branch kinds require
+   distinct named record wrappers.  Processors MUST add these where
+   necessary and apply Core first-match selection before choosing the
+   Avro branch.
 
-   Avro unions cannot immediately contain other unions and cannot repeat
-   an unnamed branch kind.  In particular, two different array schemas
-   cannot appear directly in the same union.  A processor MUST introduce
-   distinct named record wrappers when required to preserve
-   alternatives.
+   Tagged choices SHOULD use distinct named one-field records, unwrapped
+   on import.  A discriminator plus independent union needs correlation
+   validation.  Inline choices use materialized branch records;
+   selectors MUST be restored.  Defaults do not enforce selector
+   constants.
 
-   If a JSON Structure union contains overlapping alternatives, the
-   adapter MUST apply Core's first-match rule before selecting the Avro
-   branch.  The Avro branch index preserves a distinction that an
-   untagged JSON value alone does not necessarily reveal.  Reversal
-   without the source member order or type information can lose that
-   distinction.
+   String enums require legal unique symbols or reversible mappings.
+   Numeric enums MUST NOT become symbols without explicit
+   transformation. const, patterns, lengths, narrower bounds, required-
+   set alternatives, and composition generally need validation beyond
+   Avro.
 
-   A tagged choice SHOULD use a union of distinct named one-field
-   records.  Each record identifies one source tag and contains that
-   branch's value.  This remains valid when several tags have the same
-   primitive value type.  Reversal unwraps the selected record into the
-   single-property choice object.
+5.1.6.  Extensible Values and Schema Evolution
 
-   A separate discriminator enum plus an unrestricted value union is
-   also a possible carrier, but Avro cannot require the selected union
-   branch to agree with the discriminator.  That representation is
-   constraint-widening unless an additional validator checks the
-   correlation.
+   The projection of any uses different reader and writer schemas.  The
+   generic reader includes an empty named record in its union.  A
+   concrete writer adds typed fields to that record without changing the
+   reader.  Primitive, array, or map branches MAY predeclare understood
+   categories; they do not close the source domain.
 
-   An inline choice can use a union of materialized branch records.  The
-   selector MUST be restored on reversal.  A field default equal to a
-   branch name does not constrain a selector to that value; Avro has no
-   general const facility.
+   Union order and promotions matter: string can resolve as bytes, or
+   vice versa.  Value-preserving bindings MUST use named wrappers or
+   retain writer-branch identity and its exact inverse, not infer
+   categories from resolved values.
 
-   A string enum maps to an Avro enum only if its symbols are legal,
-   unique Avro identifiers or a reversible symbol mapping is supplied.
-   Replacing punctuation or adding suffixes without preserving the
-   original values loses information.  A numeric enum remains a numeric
-   carrier with additional validation; it MUST NOT become string symbols
-   without an explicit value transformation.
+   Each extensible position MUST have a stable unique full name; writers
+   MUST retain it and enclosing reader compatibility.  Unmatched new
+   union branches fail resolution.  Written fields MUST have concrete
+   types; decoding MUST use the actual writer schema as well as the
+   reader.
 
-   const, string patterns and lengths, numeric bounds narrower than the
-   carrier, alternative required sets, and Conditional Composition rules
-   are not generally expressible as Avro constraints.  Their presence in
-   doc or a custom property does not make the projection constraint-
-   preserving.
+   This reader uses the extension record for binary and collection
+   values:
+
+   {
+     "type": "record",
+     "name": "Message",
+     "namespace": "example",
+     "fields": [
+       { "name": "id", "type": "long" },
+       {
+         "name": "payload",
+         "type": [
+           "null", "boolean", "int", "long",
+           "float", "double", "string",
+           {
+             "type": "record",
+             "name": "Message_payload_AnyValue",
+             "fields": []
+           }
+         ]
+       }
+     ]
+   }
+
+   A later writer adds typed payload fields:
+
+   {
+     "type": "record",
+     "name": "Message",
+     "namespace": "example",
+     "fields": [
+       { "name": "id", "type": "long" },
+       {
+         "name": "payload",
+         "type": [
+           "null", "boolean", "int", "long",
+           "float", "double", "string",
+           {
+             "type": "record",
+             "name": "Message_payload_AnyValue",
+             "fields": [
+               { "name": "label", "type": "string" },
+               {
+                 "name": "counter",
+                 "type": {
+                   "type": "bytes", "logicalType": "decimal",
+                   "precision": 20, "scale": 0
+                 }
+               }
+             ]
+           }
+         ]
+       }
+     ]
+   }
+
+   The reader retains id but skips label and counter.  New-writer/old-
+   reader compatibility needs no defaults; new-reader/old-writer
+   requires defaults for missing required reader fields.
+
+   Bindings MUST specify extension-field and synthetic-wrapper meanings,
+   select the intended branch, and encode all data under the actual
+   writer schema, without rounding to fit floating branches.  Every
+   value MUST conform to that schema; schema changes require
+   identification or framing.
+
+   Skipped fields are lost even when the decoder knows the writer
+   schema.  The empty result MUST NOT claim canonical reconstruction
+   without independent evidence.  Value-preserving imports or relays
+   MUST decode writer fields with a writer-aware binding or retain the
+   encoded datum and writer schema.
 
 5.2.  Avro to JSON Structure
 
 5.2.1.  Types and Names
 
-   Avro null, boolean, string, int, long, float, double, and bytes map
-   respectively to Core null, boolean, string, int32, int64, float,
-   double, and binary.  The binding recovers integer and octet-sequence
-   model values directly.  Only at a selected JSON boundary does it
-   format int64 as decimal text and encode octets using the declared
-   binary-text encoding.
+   Primitives map directly, except int -> int32, long -> int64, and
+   bytes -> binary.  Non-finite values need tagged representations or
+   rejection of the source domain; finite-only restrictions MUST be
+   reported.
 
-   Avro floating-point NaN and infinity values have no Core JSON-number
-   representation.  A total value-preserving projection MUST use an
-   explicitly tagged representation for those values, or reject the
-   source domain.  Restricting to finite values MUST be reported as a
-   domain restriction.
+   Records become closed objects with every field required, including
+   nullable or defaulted fields.  Empty records use map-of-any with
+   Validation maxEntries: 0; identifying original any needs retained
+   correspondence.
 
-   Records map to closed object types; fields map to properties; every
-   field is listed in required.  A nullable Avro union does not make its
-   field optional.  An Avro field default does not make its field
-   optional at encoding time either.
+   Arrays, maps, and named references map directly after full-name
+   resolution.  Enums become string enums; round trips retain symbol
+   order. fixed becomes binary with exact octet count; maxLength MUST
+   NOT claim to reconstruct that binary size.
 
-   Arrays map to array; maps map to map; named references map to Core
-   definitions and type references.  Avro full names are resolved before
-   splitting namespaces into Core namespace objects.  An Avro enum maps
-   to a string type with enum, with the symbol order retained if a later
-   Avro round trip is required.
-
-   An Avro fixed maps to binary with its exact decoded-octet count
-   retained for validation and reversal.  Core maxLength applies to
-   strings and is not an exact binary-size keyword.  A processor MUST
-   NOT claim that maxLength: n on binary reconstructs Avro fixed(n).
-
-   An Avro union MAY become a Core type union if no required branch
-   identity is lost.  When identity matters, a tagged choice MUST
-   identify each Avro branch.  For example, Avro int and long branches
-   overlap numerically, and a long value of 1 MUST NOT be silently
-   reassigned to the int branch.  Array and map branches are declared as
-   reusable types before being referenced in a Core non-discriminated
-   union.
+   Unions MAY become Core unions without required identity loss;
+   otherwise tagged choices MUST retain branches, including int/long
+   distinctions for equal values.  Array/map union members require
+   reusable type references.
 
 5.2.2.  Logical Types and Resolution Metadata
 
-   Valid decimal on bytes or fixed maps to Core decimal only after
-   deriving compatible precision, fractional limits, bounds, and quantum
-   from the Avro coefficient domain.  For Avro precision p and scale s,
-   the absolute value is at most (10^p-1) times 10^(-s), and every value
-   is a multiple of 10^(-s).
+   Retained wide-integer bindings MUST recover the declared integer type
+   after checking precision, scale, integrality, and bounds.  Otherwise
+   decimal import MUST preserve bounds +/-(10^p-1)*10^(-s) and quantum
+   10^(-s).  The quantum is the difference between adjacent
+   representable decimal values.  One exact construction uses Core
+   precision p for s > 0, p+1 for s = 0, scale max(1,s), those bounds,
+   and Validation multipleOf equal to the quantum.  For p=2, s=2, bounds
+   are -0.99..0.99 and quantum 0.01.  Decimal constraints retain
+   fractional syntax, including .0; documents MUST declare
+   JSONStructureValidation in $uses.  Unsupported parameters MUST be
+   diagnosed, not narrowed.
 
-   Those restrictions MUST survive import, using the Validation
-   extension when needed; copying p and s by name is not sufficient.  An
-   imported definition that uses its numeric constraints MUST declare
-   JSONStructureValidation in the document-level $uses array.  For
-   example, Avro precision 2 and scale 2 requires model bounds of -0.99
-   and 0.99 and a quantum of 0.01.
+   Round trips MUST retain carrier size and logical identity. big-
+   decimal MUST use declared variable-scale semantics or report
+   restriction.  UUIDs require shared domains; fixed 16-octet versus
+   textual carriers need metadata.  Dates MAY use the shared calendar
+   domain; timestamps MAY use explicit UTC formatting with unsupported
+   ranges/fractions rejected or diagnosed.  Timezone-free types MUST NOT
+   invent offsets.  Durations MAY use uint32 month/day/millisecond
+   objects or tuples; duration text needs semantic and range
+   equivalence.
 
-   An exact logical-value construction uses Core precision p when s is
-   positive, or p+1 when s is zero, and Core scale max(1,s).  It also
-   requires the bounds above and Validation multipleOf equal to the
-   quantum.  The extra fractional position for scale zero permits Core's
-   mandatory .0 in JSON; multipleOf still excludes non-integral values.
-   Any emitted decimal constraint value also uses Core's required
-   fractional part.  An implementation that cannot support the derived
-   parameters MUST diagnose the domain rather than narrow it.
-
-   The binary carrier size and logical-type identity MUST be retained
-   for schema round trips. big-decimal, whose scale is carried with the
-   value, MUST NOT be assigned an arbitrary fixed Core scale; it needs a
-   declared variable-scale representation or a reported restriction.
-
-   A valid UUID logical type maps to uuid only for the shared UUID
-   domain.  A fixed UUID's 16-octet representation changes to Core UUID
-   text, and that carrier distinction needs metadata for reversal.
-
-   A native date MAY map to date within the shared calendar range.
-   Native timestamps MAY map to datetime after an explicit UTC
-   formatting policy, but counts outside the Core textual range and
-   unsupported fractions MUST be rejected or diagnosed.  Native
-   timezone-free time and local timestamps MUST use a representation
-   that does not invent an offset.
-
-   An Avro duration MAY be represented as an object or tuple of month,
-   day, and millisecond uint32 components.  Converting it to a single
-   Core duration string requires proof that both its value semantics and
-   range are preserved under the declared duration profile.
-
-   Unknown logical types MUST retain their underlying Avro type and the
-   unknown annotation.  A malformed logical type MUST NOT be promoted to
-   a recognized Core type merely because its name is familiar.
-
-   Avro aliases, field order, sort-order attributes, enum defaults,
-   field defaults, and reader/writer resolution rules have no full
-   equivalent in Core.  A field default is used during schema
-   resolution, not as permission for a writer to omit the field.
-   Copying it to a Core Validation default can change behavior and MUST
-   be qualified.  Source defaults for bytes and fixed MUST also be
-   decoded using Avro's byte-default rules before becoming Core binary
-   text.
+   Unknown logical types MUST retain underlying types and annotations;
+   malformed annotations MUST NOT justify recognized Core types.
+   Aliases, field/sort order, enum/field defaults, and resolution rules
+   need metadata.  Resolution defaults do not permit omitted writer
+   fields; conversion to Validation defaults MUST qualify behavioral
+   changes.  Byte/fixed defaults MUST be decoded by Avro's rules before
+   Core encoding.
 
 5.3.  Example and Preservation Boundary
 
-   The following canonical definition has a signed 64-bit identifier and
-   a required nullable note:
+   This model has an int64 identifier and required nullable note:
 
    {
      "$schema": "https://json-structure.org/meta/core/v0/#",
@@ -1348,42 +1071,16 @@ Table of Contents
      ]
    }
 
-   The application supplies id as an integer to the Avro serializer.  It
-   supplies note as a selected null or string union value.  The
-   serializer writes an Avro record; no JSON document is involved.  Only
-   when JSON is selected does Core require a decimal string such as "42"
-   for the identifier.
-
-   On import, adding an Avro field default of null would still not
-   permit omission of note from the canonical required-field model.
-   That default belongs to Avro resolution metadata and is not
-   automatically a Core default.
-
-   In the forward direction, {"type":"uint64"} uses an Avro string
-   carrier, so "18446744073709551615" remains representable.  Mapping it
-   to long would not.  Native range validation is lost unless supplied
-   outside the Avro primitive schema.
-
-   The native lossless subset includes closed required-field records,
-   compatible primitive domains, arrays, maps, supported named
-   recursion, and legal enumerations, subject to the stated numeric and
-   non-finite restrictions.  Width widening, optionality encodings,
-   tuple identity, logical carriers, and Avro resolution metadata
-   require the qualifications specified above.
+   id is supplied as an integer; note selects null or string.  An Avro
+   default would not make note optional.
 
 6.  Protocol Buffers
 
-   This section defines generation of proto3 schemas [PROTO3] with
-   explicit presence where available.  It also defines import of proto2
-   schemas [PROTO2].  Editions schemas require an explicit feature-
-   resolution step; a processor MUST NOT infer their presence or enum
-   behavior from proto3 syntax rules.
-
-   The primary instance model is the decoded Protocol Buffers message
-   API, including its presence state.  Binary wire layout and ProtoJSON
-   [PROTOJSON] are distinct representations.  A mapping MUST identify
-   which representation is being transformed.  Services, RPC methods,
-   and streaming method options are outside this type projection.
+   Generation uses proto3 [PROTO3] with explicit presence; import also
+   covers proto2 [PROTO2].  Editions features MUST resolve explicitly,
+   not inherit proto3 presence or enum assumptions.  Mappings MUST
+   distinguish decoded-message values, binary layout, and ProtoJSON
+   [PROTOJSON].  Services and methods are outside scope.
 
 6.1.  JSON Structure to Protocol Buffers
 
@@ -1452,162 +1149,73 @@ Table of Contents
 
                                   Table 6
 
-   sint32 or sint64 MAY be selected instead of the corresponding signed
-   int carrier under a declared encoding policy; the numeric domain is
-   the same, but the wire encoding differs.  Fixed-width encodings are
-   likewise not interchangeable for schema round-trip purposes.
+   Declared encoding policies MAY select sint32/sint64; ZigZag and
+   fixed-width choices change wire identity. google.protobuf.Empty is
+   not null.  String carriers do not enforce numeric or semantic
+   restrictions.
 
-   google.protobuf.Empty is an empty message, not a null scalar.
-   google.protobuf.Any contains a typed serialized Protocol Buffers
-   message; it is not the Core any type. google.protobuf.Value provides
-   a JSON-like union, but its number_value is a double.  It is an
-   alternative carrier only for a source domain whose numbers fit
-   exactly, or under a reported precision-loss policy.
-
-   The string carriers for decimal and semantic string types preserve
-   the text but do not validate it.  Comments, custom options that
-   ordinary processors ignore, and field names such as uuid do not
-   impose their semantic restrictions.
-
-   The native datetime binding uses google.protobuf.Timestamp under an
-   explicitly declared instant-mapping profile.  The binding MUST check
-   the supported year range, nanosecond precision, offset normalization,
-   and leap-second policy.  It MUST NOT silently truncate fractions or
-   invent a UTC offset.  If an observable source offset must also
-   survive, a component carrier must retain it. google.protobuf.Duration
-   represents signed seconds and nanoseconds; calendar-dependent model
-   durations are not equivalent.
-
-   Where no compatible native type exists, a temporal-text carrier MAY
-   be used with a declared value mapping.  It is a fallback for a target
-   type gap, not the default interpretation of a model type merely
-   because its Core JSON representation is textual.
+   Timestamp bindings MUST declare instant semantics and check year
+   range, nanoseconds, offset normalization, and leap seconds without
+   truncation or invented offsets.  Observable offsets need component
+   carriers.  Explicit temporal-text bindings MAY address native type
+   gaps.
 
 6.1.2.  Messages and Presence
 
-   An object maps to a message with one field per declared property.
-   Requiredness and nullability MUST be processed separately.  Under
-   proto3, optional on a scalar preserves whether that scalar was set;
-   it does not require the field to be present [PROTO-PRESENCE].
+   Objects become messages.  Scalars use explicit presence (optional T);
+   unset means absence, set includes zero, false, and empty string
+   [PROTO-PRESENCE].  Required scalars MUST additionally be checked for
+   presence.  Message fields already track presence and MUST NOT become
+   implicitly present empty objects.
 
-   A required non-null scalar uses an explicitly present field, normally
-   optional T.  An additional validator MUST require presence.  Emitting
-   an ordinary implicit-presence scalar loses the distinction between an
-   absent field and a present default-valued field, and cannot enforce
-   the Core requiredness rule.
+   Nullable properties SHOULD use a wrapper with null and value oneof
+   arms.  Wrapper absence, selected null, and selected value represent
+   the three states.  Bindings MUST reject present wrappers with unset
+   arms, require wrappers for required properties, and report these non-
+   native checks.
 
-   An optional non-null scalar also uses explicit presence.  Its unset
-   state represents absence; its set state represents the source value,
-   including zero, false, or an empty string.  Message-valued fields
-   already track presence and MUST NOT be treated as implicitly present
-   empty objects.
-
-   For a nullable property, a wrapper message SHOULD contain a oneof
-   with a google.protobuf.NullValue arm and a value arm.  An optional
-   nullable property uses absence of that wrapper for source absence.  A
-   present wrapper with the null arm selected represents a present null.
-   A present wrapper with the value arm selected represents a present
-   non-null value.
-
-   A present wrapper with no selected arm is an additional Protocol
-   Buffers state.  The adapter MUST reject it, and native oneof syntax
-   alone cannot enforce that rejection.  For a required nullable
-   property, the adapter MUST also require the wrapper itself to be
-   present.  A processor MUST report these additional validation
-   requirements.
-
-   A primitive wrapper such as google.protobuf.Int32Value by itself does
-   not encode all three states of an optional nullable Core property.
-   ProtoJSON's general permission for null to leave a field unset also
-   does not preserve an explicit null.  ProtoJSON parsing rules MUST NOT
-   be used to claim presence distinctions that the resulting message
-   lacks.
-
-   An open object has no direct message equivalent.  Unknown binary
-   fields are identified by numbers, not arbitrary JSON string keys, and
-   are not an additionalProperties map.  Extra source properties require
-   a separate map or entry-list carrier and collision checks.
+   Primitive wrappers lack present null.  ProtoJSON parsing MUST NOT
+   claim presence distinctions absent from decoded messages.  Open
+   objects need separate extra-property maps or entry lists with
+   collision checks; unknown numbered wire fields are not string-keyed
+   additional properties.
 
 6.1.3.  Collections, Tuples, and Choices
 
-   An array maps to a repeated field with the projected item type.
-   Protocol Buffers repeated fields cannot directly contain another
-   repeated field or a map; such an item MUST be wrapped in a message.
-   Nullable items also need wrappers because repeated scalar elements do
-   not have null values.
+   Arrays use repeated; nested collections MUST use message wrappers.
+   Nullable items also need wrappers.  Optional arrays/maps need outer
+   presence wrappers; required collections materialize empty values.
+   Maps use map<string,V> with legal or wrapped values; order is
+   irrelevant.  Set uniqueness and collection bounds need validation.
 
-   A repeated field does not distinguish an absent collection from an
-   empty collection.  An optional source collection therefore needs a
-   present-or-absent wrapper message around the repeated field.  The
-   same rule applies to an optional map.  A required collection can use
-   a repeated field directly when the adapter materializes an empty
-   collection instead of omitting the Core property.
+   Tuples use named message fields, retained positional order, and
+   member-presence validation; field numbers do not declare tuple order.
 
-   A Core map maps to map<string, V> when V is a legal map value type.
-   Union, nested collection, and nullable values require appropriate
-   message wrappers.  Map order is not preserved, consistent with the
-   Core map model.  Native repeated fields do not enforce set uniqueness
-   or collection-length bounds.
-
-   A tuple maps to a message with a field for each named position.  The
-   tuple order is retained in metadata and used by the instance adapter;
-   field number order does not itself declare a Core tuple.  Presence of
-   every tuple member requires additional validation.
-
-   A tagged choice maps to a oneof with one field per tag, normally
-   inside a dedicated message.  Repeated and map alternatives MUST be
-   wrapped because they are not legal direct oneof members.  Several
-   alternatives with the same scalar type remain distinct fields.  The
-   adapter MUST restore the corresponding source tag.
-
-   oneof means at most one selected field, not exactly one.  A source
-   choice requires exactly one alternative whenever the choice value is
-   present.  An unset oneof therefore needs rejection by the adapter.
-   For an inline choice, the adapter also restores or checks the
-   selector property after applying the selected branch's inherited
-   structure.
-
-   A non-discriminated union can use a oneof only with a declared first-
-   match selection rule and reversible branch wrappers where needed.
-   Flattening a union into several independent optional fields would
-   admit simultaneous alternatives and is not an equivalent schema.
+   Tagged choices use oneof fields, with repeated/map alternatives
+   wrapped.  Bindings MUST restore tags and reject unset groups when
+   choice values are present: oneof enforces at most one, not exactly
+   one.  Inline choices also restore/check selectors after inheritance.
+   Core unions need declared first-match selection and reversible
+   wrappers, not independent optional fields.
 
 6.1.4.  Field Numbers and Enumerations
 
-   Every projected field MUST receive a legal unique number within its
-   message: 1 through 536870911, excluding 19000 through 19999.  The
-   correspondence between source properties and field numbers MUST be
-   retained.  Numbers of removed fields MUST be reserved when an
-   existing projected message is evolved, and MUST NOT be reassigned to
-   unrelated properties.
+   Fields MUST receive unique numbers 1..536870911 except 19000..19999.
+   Correspondences MUST survive; removed numbers MUST be reserved, not
+   reused.  Initial allocation MAY use lowest available numbers in
+   lexicographic identifier order; this is not an evolution policy.
 
-   For an initial projection with no existing correspondence, a
-   processor MAY allocate the lowest available numbers in lexicographic
-   source identifier order.  That policy is deterministic for one source
-   document; it is not a schema-evolution policy.  Inserting a property
-   and renumbering existing fields changes the wire contract.
+   Round trips retain packages, nested scopes, JSON names, reservations,
+   and integer encodings.  String enums require explicit symbol/number
+   mappings.  Proto3 requires an initial zero symbol and admits unknown
+   numbers; extra values need validation.  Assignments and symbols MUST
+   survive round trips, and widening MUST be diagnosed.  Numeric aliases
+   lose spelling identity.
 
-   Package names, nested declaration scopes, field numbers, field JSON
-   names, reserved names and numbers, and integer encoding choices are
-   schema information.  A Core namespace or alternate name alone does
-   not retain all of them.
-
-   A Core string enumeration can use a proto3 enum only with an explicit
-   symbol-to-number mapping.  Proto3 requires a first symbol with value
-   zero.  If zero is not a source member, an added zero-valued symbol is
-   an additional target value and requires rejection by a validator.
-
-   Proto3 enums are open to unknown numeric values.  Consequently, a
-   proto3 enum does not by itself enforce a closed Core enum.  Numeric
-   aliases also do not preserve which alias spelling was used.  A
-   processor MUST retain numeric assignments and original symbols for
-   schema round trips, and MUST diagnose any additional accepted values.
-
-   const, bounds narrower than a scalar, string patterns and lengths,
-   requiredness, set uniqueness, and cross-field composition have no
-   general native proto3 constraint.  A schema using custom validation
-   options MUST identify the option vocabulary and the processors that
-   enforce it; such a result is not the standalone proto3 profile.
+   Constants, narrower bounds, patterns, lengths, requiredness,
+   uniqueness, and composition need extra validation.  Custom options
+   MUST identify vocabulary and enforcing processors; they are not
+   standalone proto3 constraints.
 
 6.2.  Protocol Buffers to JSON Structure
 
@@ -1638,97 +1246,62 @@ Table of Contents
 
                                   Table 7
 
-   Signedness MUST be preserved.  In particular, uint32 MUST NOT become
-   int32, and uint64 MUST NOT become int64.  The original varint,
-   ZigZag, or fixed-width encoding choice needs retained metadata for
-   schema round trips.  Non-finite floating values need a separate
-   explicit representation or a reported source-domain restriction.
-
-   A closed enum MAY map to a numeric type with enum of the distinct
-   numeric assignments, while retaining symbol names and aliases
-   separately.  An open enum MUST permit unknown int32 values; a closed
-   Core string enumeration would incorrectly narrow its domain.  A
-   string-symbol profile is permitted only with a defined representation
-   for unknown numeric assignments.
+   Signedness MUST survive.  Encoding choices need metadata; non-finite
+   floats need explicit carriers or reported restrictions.  Closed enums
+   MAY use numeric enums with retained symbols/aliases.  Open enums MUST
+   admit unknown int32 values; symbol profiles need an unknown-number
+   representation.
 
 6.2.2.  Presence and Compound Mapping
 
-   For proto2, required fields become required Core properties.
-   Optional fields, including scalars with defaults, remain optional
-   non-null properties.  The default supplies an API getter value when
-   the field is unset; it does not erase the presence bit.  A Core
-   Validation default that materializes a property is not automatically
-   equivalent.
+   Proto2 required fields become required properties; optional fields
+   remain optional non-null, including defaulted scalars.  Reading a
+   getter's default value does not make an unset field present.
+   Validation defaults instead create missing properties.
 
-   For proto3 explicit-presence fields, an unset field maps to an absent
-   Core property and a set field maps to a present non-null property.
-   For an implicit-presence scalar, the decoded message cannot
-   distinguish absence from a present default value.  The canonical
-   value projection materializes the scalar's effective value as a
-   required Core property.  An alternative omission-of-defaults profile
-   MUST declare that policy and MUST NOT claim to recover the original
-   wire presence.
+   Proto3 explicit presence maps unset/set to absent/present.  Implicit
+   scalars materialize effective values as required properties;
+   omission-of-defaults profiles MUST be declared without claiming
+   original wire presence.  Repeated/map fields become required arrays/
+   maps, materializing empties.  Typed keys need reversible canonical
+   strings and MUST retain signedness, bounds, and boolean true/false
+   spellings.
 
-   Repeated fields map to required Core arrays and map fields to
-   required Core maps, with empty collections materialized when
-   necessary.  Marking them optional would introduce a distinction
-   absent from the decoded source model.  Typed integral or boolean map
-   keys require a reversible conversion to canonical JSON string keys.
-   The target key domain MUST retain signedness, bounds, and the exact
-   true or false spelling for boolean keys.
-
-   A real oneof maps to an optional tagged choice property whose
-   alternatives are named after the member fields.  An unset group maps
-   to absence of that property.  Proto3 optional is not a user-visible
-   oneof choice; a synthetic descriptor oneof used to implement it MUST
-   NOT be imported as a separate application alternative.
-
-   An empty message can be represented as a map of any with maxEntries:
-   0 under the Validation extension.  It MUST NOT be changed to null.
-   Ordinary messages become closed Core objects for the declared-field
-   view.  Unknown binary fields are outside that view; if preserving
-   them is part of the selected source model, they require an additional
-   numbered-field representation rather than silent removal.
+   Real oneof groups become optional tagged choices named by fields;
+   unset means absent.  Synthetic proto3-optional groups MUST NOT become
+   choices.  These descriptor-only oneofs track scalar presence, not
+   application choices.  Declared-field messages become closed objects;
+   empty messages use map-of-any, Validation maxEntries: 0, not null.
+   Preserved unknown wire fields require an additional numbered-field
+   representation.
 
 6.2.3.  Well-Known Types and ProtoJSON
 
-   Well-known types require interpretation by full type identity, not by
-   an unqualified name such as Timestamp.
+   Full google.protobuf identities govern well-known types:
 
-   *  google.protobuf.NullValue can represent Core null when the
-      enclosing presence state is handled.
+   *  NullValue: null with enclosing presence preserved.
 
-   *  google.protobuf.Timestamp can represent a Core datetime under its
-      UTC and nanosecond restrictions.  Its documented range and
-      normalization rules MUST be checked.
+   *  Timestamp: UTC datetime; range, nanoseconds, and normalization
+      MUST be checked.
 
-   *  google.protobuf.Duration can be represented by signed seconds and
-      nanoseconds with their source bounds and sign-consistency rule.
-      Mapping every such value to, or from, calendar-based duration text
-      requires a separately declared duration profile.
+   *  Duration: signed seconds/nanoseconds with bounds and consistent
+      signs; calendar text needs a declared profile.
 
-   *  google.protobuf.Struct, ListValue, and Value map to the
-      corresponding JSON-like map, array, and choice only over their
-      supported number domain.  They do not prove that arbitrary Core
-      number values fit in binary64.
+   *  Struct, ListValue, Value: JSON-like maps, arrays, and values;
+      numeric values use binary64.
 
-   *  google.protobuf.Any requires preservation of its type URL and
-      serialized message, or resolution of that type and a typed payload
-      projection.  It MUST NOT be flattened into unconstrained JSON.
+   *  Any: retain type URL and serialized message, or resolve and
+      project the typed payload; it MUST NOT become unconstrained JSON.
 
-   ProtoJSON uses JSON strings for 64-bit integers, Base64 text for
-   bytes, and strings for enum symbols.  It can use json_name or derived
-   JSON field names instead of declaration names.  It also accepts input
-   forms that are not Core's canonical integer-string grammar.  A
-   projection MUST distinguish accepted ProtoJSON input syntax from
-   canonical output and decoded values.  General ProtoJSON null handling
-   does not turn every field into a nullable Core type.
+   ProtoJSON uses strings for 64-bit integers and enum symbols, Base64
+   for bytes, and json_name or derived names.  Its accepted input
+   grammar differs from Core.  Mappings MUST distinguish input syntax,
+   canonical output, and decoded values; JSON null may leave fields
+   unset.
 
 6.3.  Examples and Preservation Boundary
 
-   For a Core object with a required uint64 property id and an optional
-   string array labels, the following proto3 carrier preserves
-   collection presence:
+   Required id and optional labels use:
 
    syntax = "proto3";
    package example;
@@ -1742,12 +1315,10 @@ Table of Contents
      Labels labels = 2;
    }
 
-   An unset labels field represents absence; a present Labels message
-   with no values represents an empty array.  A validator must require
-   id to be set.  Replacing Labels labels with a direct repeated field
-   would collapse absence and emptiness.
+   Unset labels means absence; present empty Labels means an empty
+   array.  Validation requires id presence.
 
-   In the reverse direction, consider:
+   Conversely:
 
    syntax = "proto3";
    package example;
@@ -1759,7 +1330,7 @@ Table of Contents
      }
    }
 
-   Its declared-field Core value model is:
+   The declared-field import is:
 
    {
      "$schema": "https://json-structure.org/meta/core/v0/#",
@@ -1780,29 +1351,20 @@ Table of Contents
      "additionalProperties": false
    }
 
-   The empty message maps to {}; a selected zero count maps to
-   {"result":{"count":0}}. The original numbers 4 and 9 are not
-   recoverable from this Core declaration alone.
-
-   Protocol Buffers supports reversible carriers for a broad typed
-   subset, but a nontrivial Core object with required fields is not
-   generally native constraint-preserving in proto3.  Presence wrappers,
-   unset oneofs, enum openness, and validation rules MUST be included in
-   any qualified preservation claim.  Binary or ProtoJSON compatibility
-   MUST be stated separately from preservation of decoded values.
+   Empty maps to {}; selected zero maps to {"result":{"count":0}}.
+   Numbers 4 and 9 need metadata.  Preservation claims MUST qualify
+   wrapper states, unset oneofs, enum openness, and external validation,
+   and distinguish decoded values from binary or ProtoJSON
+   compatibility.
 
 7.  XML Schema (XSD)
 
-   This section specifies XML Schema 1.1 [XSD-STRUCTURES]
-   [XSD-DATATYPES].  A processor using XSD 1.0 MUST identify that
-   profile and diagnose reliance on 1.1 assertions, explicit timezone
-   constraints, or other unavailable features.
-
-   The source or target XML instance model consists of element and
-   attribute expanded names, typed content, and content order where
-   relevant.  Namespace prefix spelling is not an expanded name.  A
-   schema's namespace prefixes MUST be resolved before mapping type and
-   element references.
+   This section uses XSD 1.1 [XSD-STRUCTURES] [XSD-DATATYPES].  XSD 1.0
+   profiles MUST diagnose unavailable assertions, timezone constraints,
+   and other features.  An expanded name combines a namespace URI and a
+   local name, independent of the namespace prefix.  Instances comprise
+   expanded names, typed content, and relevant order; namespace prefixes
+   MUST resolve before reference mapping.
 
 7.1.  JSON Structure to XSD
 
@@ -1866,180 +1428,83 @@ Table of Contents
 
                                   Table 8
 
-   Integer restrictions use inclusive facets with the exact bounds in
-   Section 3.7. xs:unsignedLong covers all of uint64; xs:long does not.
-   An unrestricted xs:integer is not an equivalent carrier for a bounded
-   128-bit source without the range facets.
+   Integer facets retain exact Section 3.7 bounds.  Exponent notation
+   MUST expand exactly to decimal text without requiring every value to
+   pass through binary64; double alternatives retain the common
+   precision qualifications.  Constraint-preserving floats MUST exclude
+   non-Core values and retain or diagnose narrower domains.
 
-   For generic number, JSON exponent notation MUST be expanded to an
-   equivalent xs:decimal lexical form without rounding.  A binary
-   xs:double alternative is permitted only with the precision
-   qualifications in Section 3.7.  A processor MUST NOT require every
-   JSON number to pass through a host binary64 value during this
-   expansion.
+   totalDigits/fractionDigits equivalence MUST be checked; fractional
+   digits are upper bounds, not display widths.  Reversal MUST restore
+   Core's fractional syntax.  Temporal restrictions MUST enforce Core
+   calendars, lexical forms, [RFC3339] offsets for time/datetime, and
+   timezone-free dates.
 
-   xs:float and xs:double also admit non-finite values.  A constraint-
-   preserving forward projection MUST exclude values not in the Core
-   JSON domain.  Source constraints that require an exact narrower
-   floating domain MUST also be retained or diagnosed.
-
-   For decimal values, totalDigits and fractionDigits constrain the XSD
-   value space; fractionDigits is an upper bound, not a demand for
-   exactly that many displayed digits.  The processor MUST verify that
-   these facets express the source precision and scale semantics before
-   claiming equivalence.  Decimal text normalization can remove trailing
-   zeroes, and the Core fractional-part syntax MUST be restored on
-   reversal.
-
-   XSD date and time datatypes can admit absent timezones, different
-   year domains, and lexical forms such as an end-of-day time that Core
-   does not accept.  Core datetime and time require an [RFC3339] offset;
-   Core date has no appended timezone.  The XSD projection MUST add the
-   applicable timezone, calendar, and lexical restrictions.  A plain
-   built-in temporal type is not an exact mapping merely because its
-   name resembles the Core type.
-
-   The xs:anyURI value space and whitespace handling are not an
-   [RFC3986] URI-reference assertion.  Exact Core URI validation needs a
-   compatible restriction or additional validation.  UUID [RFC9562] and
-   JSON Pointer have no built-in XSD datatype.
+   xs:anyURI does not assert [RFC3986] validity; compatible restrictions
+   or validation are needed.  UUID [RFC9562] and JSON Pointer lack
+   built-in types.
 
 7.1.2.  XML Text and Binary Values
 
-   Not every JSON string can be written as XML character data.  In
-   particular, JSON can contain an escaped U+0000 character, which
-   cannot appear in an XML 1.0 document.  A direct xs:string profile is
-   value-preserving only for the selected XML version's character
-   repertoire.
+   XML 1.0 cannot carry U+0000.  Out-of-repertoire characters MUST be
+   rejected or reversibly encoded, for example as Base64 UTF-8.
+   Escaping MUST account for line-ending and attribute normalization,
+   not just < and &.
 
-   A processor MUST reject out-of-repertoire characters or select a
-   declared reversible encoding, such as Base64-encoded UTF-8 text.
-   Removing characters is value loss.  XML escaping and character
-   references MUST also account for end-of-line and attribute-value
-   normalization.  Ordinary escaping of < and & does not solve
-   character-repertoire or normalization problems.
-
-   The binary binding supplies the model's octets to the chosen XSD
-   binary type.  An encoded Core JSON input is decoded only at that JSON
-   boundary. length, minLength, and maxLength on an XSD binary datatype
-   count octets; a bound on the Base64 text length is not the same
-   bound.  Compression and media-type annotations require retained
-   metadata and MUST NOT cause automatic decompression unless the
-   selected instance transformation specifies it.
+   Binary bindings supply octets; binary length facets count octets, not
+   encoded text.  Compression/media-type metadata MUST NOT trigger
+   decompression without a selected transformation.
 
 7.1.3.  Objects, Properties, and Nullability
 
-   A Core object maps to an XML complex type with child elements for
-   declared properties.  The canonical projection uses xs:all for
-   single-occurrence property elements so that the source object's
-   unordered properties do not acquire a required sequence order.  The
-   property element has minOccurs="1" when required and minOccurs="0"
-   when optional; its maxOccurs is 1.
+   Objects use complex types with xs:all singleton property elements:
+   minOccurs is 1 when required, 0 otherwise; maxOccurs is 1.
+   Collections stay inside property containers (Section 7.1.4).
+   Nullable elements use nillable="true"; absent, nilled, and empty non-
+   nilled states MUST remain distinct.  Null-only types MUST enforce
+   nil-only behavior or diagnose widening, not become unrestricted
+   strings.
 
-   Collections are contained inside their single property element as
-   described in Section 7.1.4.  This avoids applying an unordered
-   singleton compositor directly to repeated items.
+   Closed objects MUST NOT gain unrestricted wildcards.  Open objects
+   need key/value collections; bindings MUST preserve arbitrary string
+   keys and prevent declared-property collisions. xs:any requires
+   separate treatment of expanded names, namespaces, and
+   processContents, not an assumed JSON-map equivalence.
 
-   A nullable property element is nillable="true".  Its nilled state
-   represents an explicit null; an absent optional element represents an
-   absent property.  These states MUST remain distinct.  An empty non-
-   nilled element is not a null value.
-
-   For a null-only source type, nillable="true" alone is insufficient:
-   it permits nil but does not require it.  A processor MUST impose a
-   supported nil-only restriction or diagnose the additional non-null
-   states.  It MUST NOT map null to an unrestricted empty string.
-
-   A closed object MUST NOT acquire an unrestricted xs:any or
-   xs:anyAttribute wildcard.  An open object's extra properties can use
-   a dedicated key/value entry collection.  The adapter MUST prevent
-   collisions with declared properties and preserve each arbitrary JSON
-   string key.
-
-   A wildcard is not a general JSON map: its keys are XML expanded
-   names, and namespace and processContents restrictions affect its
-   domain.  A processor MUST NOT substitute xs:any for arbitrary
-   additional properties without addressing those differences.
-
-   An object property MAY map to an XML attribute under an explicitly
-   declared layout.  Attributes cannot be nilled and cannot carry
-   arbitrary complex values.  A nullable attribute therefore needs a
-   different carrier or a reported restriction.  The attribute/element
-   decision and expanded name MUST be retained for schema round trips.
+   Explicit layouts MAY use attributes, which cannot be nilled or carry
+   arbitrary complex values.  Nullable attributes need carriers or
+   restrictions.  Round trips MUST retain node kinds and expanded names.
 
 7.1.4.  Arrays, Maps, Tuples, and Choices
 
-   An array uses a container element whose content is a sequence of item
-   elements.  The item element's minOccurs and maxOccurs represent the
-   collection bounds; an omitted maximum maps to unbounded.  Item
-   nullability uses nillable independently of container nullability.  An
-   optional container distinguishes absence from an empty array.
+   Arrays contain item sequences with occurrence bounds, unbounded when
+   no maximum exists.  Item and container nullability are independent;
+   optional containers distinguish absence from emptiness.  Sets need
+   equivalent JSON-equality validation; scalar xs:unique MUST NOT claim
+   arbitrary-value uniqueness.
 
-   A set uses the array carrier, but uniqueness under arbitrary JSON
-   value equality is not generally an XSD uniqueness constraint.
-   xs:unique over selected scalar fields MUST NOT be described as
-   equality of arbitrary JSON objects.  Additional validation is
-   required unless an equivalent uniqueness rule has been constructed.
-
-   A map uses a container containing zero or more entry elements.  Each
-   entry has a string-valued key child and a typed value child.  The key
-   is character content, not an XML element name, so empty keys and keys
-   containing punctuation remain representable within the XML character
-   repertoire.  An xs:unique on the map container MUST ensure distinct
-   keys where that identity constraint is supported.  Its selector and
-   field paths MUST use the correct namespaces.
-
-   A tuple uses an xs:sequence with exactly one element per tuple
-   position, in tuple order.  Every member has minOccurs="1" and
-   maxOccurs="1".  Positional JSON values are converted to and from
-   these child elements by the adapter.
-
-   A tagged choice uses xs:choice with one single-occurrence branch
-   element per tag.  The choice compositor itself has minimum and
-   maximum occurrence 1 when the value is present.  Branch element names
-   provide the tags, and branch content provides the selected value.
-
-   An inline choice requires materialized branch content and an exact
-   selector-to-branch relation.  A selector attribute or a type-
-   alternative mechanism can be used only when its rules express that
-   relation.  Merely declaring a selector string beside an unconstrained
-   xs:choice is not sufficient.
+   Maps contain repeated entry elements with text key and typed value
+   children, including empty/punctuated keys within the character
+   repertoire.  Supported xs:unique MUST enforce key uniqueness with
+   namespace-correct paths.  Tuples use xs:sequence in positional order,
+   each occurrence exactly one.  Tagged choices use xs:choice occurring
+   exactly once, with singleton tagged elements.  Inline choices need
+   materialized branches and exact selector correlation.
 
 7.1.5.  Facets, Inheritance, and Names
 
-   Numeric bounds map to the corresponding inclusive or exclusive facets
-   when the source and target numeric value spaces agree.  String
-   lengths map to length facets only when the units and whitespace
-   treatment agree. enum and const can use enumeration facets on
-   suitable simple types.  XSD fixed on an element or attribute has
-   node-defaulting semantics and MUST NOT be used as a general
-   substitute for every Core constant.
+   Bounds, lengths, and enumeration facets require matching value
+   spaces, units, and whitespace behavior.  Node-defaulting fixed MUST
+   NOT substitute for general const.  ECMAScript patterns MUST be
+   translated to equivalent XSD matching or reported unsupported.
 
-   Core validation patterns use ECMAScript regular expressions; XSD
-   patterns use the XSD regular-expression language.  Their syntax,
-   matching behavior, character classes, and support for anchors and
-   lookarounds differ.  A processor MUST translate and establish
-   equivalent matching or report the pattern as unsupported.  Copying
-   the pattern string unchanged is not a general mapping.
-
-   Abstract complex types and compatible simple inheritance MAY use
-   native XSD type derivation.  An XSD extension normally appends
-   content according to XML content-model rules; it is not arbitrary
-   unordered property merging.  Materializing Core inheritance is
-   permitted, with the loss of inheritance identity reported or
-   retained.
-
-   An XSD namespace is a URI, not a dot-separated Core namespace.
-   Projected namespace-to-URI correspondence MUST be explicit.  Expanded
-   names are identified by their namespace URI and local name, not by a
-   prefix chosen for one document.  XML names and Core identifiers have
-   different legal character sets and can require reversible alternate
-   names.
-
-   Descriptions map to xs:documentation.  Other retained annotations MAY
-   use xs:appinfo with an identified source vocabulary or a companion
-   artifact.  Such annotations do not impose XSD validation rules by
-   themselves.
+   Compatible abstract types and inheritance MAY use XSD derivation;
+   extension appends XML content, not unordered properties.
+   Materialization must retain or report inheritance identity.
+   Namespace-URI correspondence MUST be explicit; expanded names are
+   URI/local-name pairs, requiring reversible legal identifiers.
+   Descriptions use xs:documentation; identified xs:appinfo or companion
+   metadata MAY retain other annotations without enforcing them.
 
 7.2.  XSD to JSON Structure
 
@@ -2091,103 +1556,54 @@ Table of Contents
 
                                  Table 9
 
-   An unrestricted xs:integer, xs:positiveInteger, or
-   xs:nonNegativeInteger MUST NOT be assigned a finite Core integer
-   type.  The default Core decimal precision and scale likewise MUST NOT
-   be applied to an unbounded xs:decimal, since doing so narrows the
-   source domain.
+   Unbounded integer derivatives MUST NOT acquire finite widths, nor
+   unbounded decimals Core's default precision/scale.  Arbitrary-
+   precision processing MAY use number; explicit numeric text MAY serve
+   as an alternative, with type loss qualified.
 
-   A processor MAY use Core number for exact finite decimal values if
-   the selected JSON number processing preserves arbitrary precision.
-   Alternatively, it MAY use text with the source numeric interpretation
-   retained.  A plain string loses the source numeric type and requires
-   the corresponding qualification.
-
-   xs:normalizedString, xs:token, list types, and other whitespace-
-   normalized types have rules beyond a string's characters.  A
-   processor MUST identify whether it projects pre-validation lexical
-   text or post-validation typed values.  It MUST NOT claim to
-   reconstruct original whitespace after projecting a normalized value.
-
-   An XSD list maps to an array of the projected item type only when
-   whitespace tokenization and the item lexical mapping are defined.
-   Its lexical string representation changes.  An XSD union requires
-   retention of selected member identity where validation assigns that
-   identity; overlapping members MUST NOT be flattened by assumption.
-
-   For xs:QName, a lexical value such as p:Item depends on the in-scope
-   namespace binding of p.  Retaining that string without the binding
-   loses the name's meaning.  A prefix-independent carrier can use
-   separate namespace-URI and local-name properties.
+   Processors MUST identify lexical versus post-validation values;
+   normalized whitespace cannot claim lexical recovery.  Lists become
+   arrays only with defined tokenization/item mappings.  Union member
+   identity MUST survive where assigned; overlap cannot be assumed
+   harmless.  QName values need namespace bindings or URI/local-name
+   carriers.
 
 7.2.2.  Elements, Attributes, and Content Models
 
-   Each selected global element can become a Core root.  A collection of
-   global types or elements MUST NOT select an arbitrary first entry as
-   the only root.  Global type identity and global element identity are
-   distinct and MUST be retained separately.
+   Selected global elements become roots; global collections MUST NOT
+   select an arbitrary first root.  Element/type identities MUST remain
+   separate.  Elements and attributes become properties under the
+   presence rules above; containerless repeated particles become bounded
+   arrays, including empty arrays.  Required attributes are non-null.
+   Node roles/namespaces MUST survive, with distinct identifiers for
+   same-local-name attributes and elements.
 
-   Single child elements map to properties. minOccurs="0" controls
-   optionality; nillable="true" controls nullability.  A repeated
-   particle maps to an array with its occurrence bounds.  When repeated
-   elements have no container, zero occurrences map canonically to an
-   empty array, not to an independently observable absent container.
+   Simple content with attributes needs a dedicated value property whose
+   name MUST avoid collisions and identify its synthetic role.
+   Compatible xs:all singletons become unordered objects; fixed
+   sequences can be tuples, otherwise ordering needs a carrier or loss
+   report.  Distinguishable choices become tagged choices, optional or
+   repeated as needed; multi-element branches MUST NOT become unrelated
+   leaves.
 
-   Attributes map to separate properties with their attribute role and
-   expanded names retained.  A required attribute is required and non-
-   null.  An element and an attribute with the same local name MUST
-   receive distinct Core identifiers.  A processor MUST NOT merge them
-   or infer that both have the same namespace.
-
-   Simple content with attributes requires an object containing a
-   dedicated value property and the attribute properties.  Any synthetic
-   value-property name MUST avoid collisions and be identified for
-   reversal.
-
-   An xs:all of compatible singleton elements can map to an unordered
-   Core object.  An xs:sequence carries order that an ordinary Core
-   object does not enforce.  A fixed sequence can map to a tuple when
-   each position and occurrence are fixed; otherwise source order
-   requires an explicit ordered representation or a loss diagnostic.
-
-   An xs:choice can map to a tagged choice if its alternatives are
-   distinguishable.  Optional choices need an absent state; repeated
-   choices need an array of choice values.  A compositor containing
-   groups of several elements MUST NOT be reduced to a choice of its
-   individual leaf elements.
-
-   Mixed content contains ordered text and element events.  Separating
-   it into unordered properties or collecting all text in one string
-   loses ordering.  A value-preserving representation requires an
-   ordered array of tagged text and element events with their names and
-   values.  That is an explicit XML-content profile, not the ordinary
-   property-based projection defined here.
+   Mixed content needs an explicit XML-content profile: ordered tagged
+   text/element events retaining names and values, not unordered
+   properties or concatenated text.
 
 7.2.3.  XML-Specific Semantics
 
-   Element and attribute defaults, fixed values, whitespace
-   normalization, and validation-time augmentation depend on the
-   selected XML instance model.  A processor MUST state whether defaults
-   have already been applied.  It MUST NOT describe post-validation
-   defaulted data as a reconstruction of an originally absent node.
-
-   Substitution groups, dynamic xsi:type, type alternatives, wildcard
-   namespace constraints, processContents, identity constraints, and XSD
-   assertions have no general direct Core equivalent in this profile.  A
-   processor MUST construct an equivalent declared representation or
-   diagnose the loss. xs:keyref MUST NOT disappear as if it were
-   documentation.
-
-   Likewise, xs:anyType permits XML structures not described by Core
-   any, including attributes and mixed content.  Converting it to
-   unconstrained JSON requires a defined XML-to-JSON representation; the
-   keyword any alone supplies none.
+   Validation can add default values and type information; this is
+   called augmentation.  Processors MUST state default/augmentation
+   state, not claim original absence from defaulted nodes.  Substitution
+   groups, xsi:type, type alternatives, wildcard namespaces,
+   processContents, identity constraints including xs:keyref, and
+   assertions MUST receive equivalent representations or loss
+   diagnostics. xs:anyType needs a defined XML-to-JSON representation
+   for attributes and mixed content.
 
 7.3.  Example and Preservation Boundary
 
-   For a Core object with a required string name and an optional
-   nullable int32 property age, the following XSD carries the presence
-   distinctions and permits either property order:
+   Required name and optional nullable age use:
 
    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
      <xs:element name="Person">
@@ -2201,50 +1617,24 @@ Table of Contents
      </xs:element>
    </xs:schema>
 
-   Within the XML-character-compatible string subset, omission of age
-   represents absence, while <age xsi:nil="true"/> represents a present
-   null when xsi is bound to http://www.w3.org/2001/XMLSchema-instance.
-   An empty non-nilled age is invalid, rather than a null integer.  The
-   child order age followed by name is also valid.
-
-   In the reverse direction, an xs:unsignedLong value of
-   18446744073709551615 becomes a Core uint64 value encoded as
-   "18446744073709551615".  An unrestricted xs:integer does not acquire
-   that same upper bound.
-
-   The property-oriented lossless subset requires compatible text
-   repertoires, explicit namespace and layout correspondence,
-   expressible facets, and content models whose ordering is preserved.
-   General XML mixed content, arbitrary wildcards, identity rules, and
-   validation-time augmentation are outside that subset unless their
-   additional representations and validators are part of the declared
-   profile.
+   Either child order is valid.  Omission means absence; <age
+   xsi:nil="true"/> means present null with xsi bound to
+   http://www.w3.org/2001/XMLSchema-instance; empty non-nilled age is
+   invalid.
 
 8.  CDDL
 
-   This section specifies CDDL as defined in [RFC8610].  A processor
-   MUST declare whether the schema is interpreted over JSON or over CBOR
-   [RFC8949].  Equal CDDL syntax does not imply equal serialization
-   domains: CBOR includes byte strings, tagged values, undefined values,
-   non-finite floating values, and non-text map keys that JSON does not.
+   CDDL [RFC8610] processors MUST identify JSON versus Concise Binary
+   Object Representation (CBOR) [RFC8949] interpretation.  CBOR adds
+   octets, tags, undefined, non-finite floats, and non-text keys.
+   Additional controls, including [RFC9165], need identified, enforced
+   vocabularies.
 
-   The primary mapping below is the CBOR logical-value profile.
-   Section 8.3 defines the changes needed for JSON representation.
-   Additional controls, including those in [RFC9165], require an
-   identified control vocabulary and an implementation that enforces it.
-
-   This native profile differs from Core's existing CBOR mapping.  Core
-   first uses its JSON type model, except that binary remains an octet
-   sequence.  The native profile here instead binds wide integers to
-   CBOR integers or bignums and permits native decimal fractions.  Both
-   produce CBOR, but their values are not wire-compatible for those
-   types.
-
-   A processor MUST identify which CBOR binding is selected.  It MUST
-   NOT infer the native profile solely from a CBOR media type.  To
-   describe Core's existing CBOR mapping in CDDL, use the JSON
-   representation rules in Section 8.3 with the Core exception that
-   binary uses bstr rather than encoded tstr.
+   The primary profile binds native CBOR logical values.  Core's
+   existing CBOR mapping instead follows Section 8.3, except binary uses
+   bstr; wide integers and decimals are not wire-compatible with this
+   native profile.  Processors MUST identify the binding, not infer it
+   from the media type.
 
 8.1.  JSON Structure to CDDL
 
@@ -2299,16 +1689,9 @@ Table of Contents
 
                                   Table 10
 
-   CDDL int in its CBOR interpretation covers -18446744073709551616
-   through 18446744073709551615.  It MUST NOT be substituted for an
-   unrestricted Core int64 without preserving the narrower bounds.  For
-   unsigned types, uint .size n can express the value range of an
-   n-octet unsigned integer; it does not require that many octets in the
-   CBOR encoding.
-
-   The following rules express the complete signed and unsigned 128-bit
-   logical domains.  The Core JSON adapter converts these integers to
-   and from decimal strings.
+   CBOR int spans -18446744073709551616..18446744073709551615; narrower
+   Core bounds MUST survive. uint .size n bounds values, not encoded
+   width.  The complete 128-bit domains use:
 
    js-uint128 = uint / #6.2(bstr .size (0..16))
 
@@ -2317,62 +1700,31 @@ Table of Contents
 
    js-int128 = int / #6.2(js-b127) / #6.3(js-b127)
 
-   For tag 2, the byte string is an unsigned big-endian magnitude n.
-   For tag 3, the value is -1-n.  For a 16-octet signed magnitude, the
-   .bits restriction excludes bit 7 of the first octet, so n does not
-   exceed 2^127-1.  Shorter magnitudes need no such bit restriction.
-   Tags with larger byte strings are outside this bounded encoding
-   profile even when redundant leading zeroes would yield an in-range
-   value.
+   Tag 2 carries unsigned big-endian n; tag 3 means -1-n.  For signed
+   16-octet magnitudes, .bits excludes first-octet bit 7, limiting n to
+   2^127-1.  Larger byte strings are excluded even with redundant
+   zeroes.  Explicit tstr alternatives MAY be used but MUST enforce
+   grammar and bounds.
 
-   A processor MAY instead retain 128-bit integers as decimal tstr
-   values.  In that case it MUST preserve the grammar and range, rather
-   than imply that text is a native CBOR integer.
+   CDDL number admits integers/floats, not arbitrary JSON decimals;
+   silent rounding MUST NOT occur.  Tag-4 alternatives MAY use
+   representable exponent and mantissa components.  Decimal bindings
+   MUST enforce effective precision, scale, and bounds on
+   mantissa*10^exponent, with compatible digit semantics; unconditional
+   float64 is forbidden.  Tool-limited text alternatives need exact
+   parsing/formatting, not a choice based on Core's JSON spelling.
 
-   CDDL number is an integer-or-floating-point choice; it is not an
-   arbitrary-precision JSON decimal-number type.  A source number
-   outside that domain MUST NOT be rounded silently.  A declared
-   decimal-fraction representation MAY use tag 4 with an exponent and
-   mantissa when both components fit the chosen CBOR representation.
-   This is a different instance representation, not an unrestricted
-   promise that number preserves every Core number.
-
-   Core decimal MUST NOT be mapped unconditionally to float64.  The
-   native decimal-fraction binding uses tag 4 with value mantissa times
-   10^exponent and MUST enforce the effective precision, scale, and
-   numeric bounds.  Plain #6.4([int, integer]) does not enforce those
-   Core restrictions.  The source and target interpretations of
-   significant digits and fixed scale MUST be reconciled, not inferred
-   from matching parameter names.
-
-   A decimal-text carrier is an explicit alternative when the selected
-   CBOR tooling does not support a compatible decimal-fraction binding.
-   It preserves the numeric value only with an exact parse and format
-   rule.  It MUST NOT be selected solely because Core uses decimal text
-   when serializing that type as JSON.
-
-   Binary model values bind directly to bstr octet sequences.  Decoding
-   is needed only for a separately selected encoded input, such as Core
-   JSON.  The declared encoding, compression, and media type are
-   retained when a schema round trip is required.  A CBOR tag for a
-   semantic string type MAY be used under a declared tag profile, but
-   its identity and content constraints MUST be checked.  For example,
-   the CDDL prelude's tag-0 text rule does not by itself validate every
-   character of an [RFC3339] date-time.
-
-   For Core any, a recursive target rule MUST restrict maps to text
-   keys, arrays to recursively compatible values, and leaves to
-   supported JSON scalars.  It MUST exclude undefined, non-finite
-   floating values, and arbitrary tags unless a reversible
-   representation for those values is explicitly selected.  Using
-   unrestricted CDDL any would widen the domain beyond JSON.
+   Binary binds to octets.  Semantic tags MAY use declared profiles
+   whose identity and content MUST be checked; tag-0 text does not
+   validate [RFC3339] syntax.  Core any MUST use recursive JSON-
+   compatible arrays, text-keyed maps, and supported scalars, excluding
+   undefined, non-finites, and arbitrary tags unless explicitly
+   represented reversibly.
 
 8.1.2.  Maps and Presence
 
-   A Core object maps to a CDDL map with one literal text key per
-   declared property.  Required properties have occurrence one; optional
-   properties use ?. A nullable value uses a type choice containing nil.
-   Thus optionality and nullability remain separate:
+   Objects use literal text keys: occurrence one for required, ? for
+   optional, and / nil for nullable:
 
    presence-example = {
      "required": tstr,
@@ -2381,101 +1733,54 @@ Table of Contents
      ? "optional-nullable": tstr / nil
    }
 
-   A closed object has no wildcard entry.  An open object adds a
-   wildcard entry for undeclared text keys with the projected
-   additional-property value type.  Known-key entries MUST use cut
-   semantics so that a wildcard cannot accept an invalid value for a
-   known key.  CDDL's literal-key colon notation includes this cut
-   behavior.
-
-   For example, the map below rejects a string-valued level; the
-   wildcard MUST NOT absorb it as an extra property:
+   Closed objects omit wildcards; open objects add projected extra-value
+   rules.  Known keys MUST use cuts, supplied by literal-key colon
+   notation, to prevent wildcard bypass.  Here the cut commits level to
+   0..255; a string-valued level cannot fall back to the wildcard:
 
    open-reading = {
      ? "level": 0..255,
      * tstr => any
    }
 
-   In this example, the unrestricted any is appropriate only if the
-   additional-property profile explicitly permits the complete CBOR
-   domain.  A projection of Core additionalProperties: true MUST use the
-   JSON-compatible recursive rule described in Section 8.1.1 instead.
+   Here any requires a full-CBOR extra-value profile; Core
+   additionalProperties: true MUST instead use Section 8.1.1' recursive
+   JSON domain.
 
-   A Core map maps to { * tstr => V }, where V is the projected value
-   type.  It MUST NOT acquire numeric or tagged keys.  The adapter MUST
-   reject duplicate logical keys when a CBOR encoding would otherwise
-   expose them; JSON objects and Core maps do not provide an ordered
-   duplicate-key representation.
-
-   Alternative required sets need equivalent group alternatives that
-   also exclude instances satisfying more than one complete set.  A
-   simple inclusive CDDL group choice does not impose that exclusion
-   when alternatives overlap.  The processor MUST construct the exact
-   condition or report the residual validation rule.
+   Maps use { * tstr => V }. Bindings MUST reject duplicate logical keys
+   and MUST NOT add numeric/tagged keys.  Alternative required sets MUST
+   enforce exactly-one-complete-set semantics or report residual
+   validation.
 
 8.1.3.  Arrays, Tuples, Unions, and Choices
 
-   An array maps to [* T] for projected item type T.  Inclusive minimum
-   m and maximum n map to [m*n T].  An absent upper bound uses the
-   corresponding open occurrence range.  A fixed tuple maps to an array
-   group containing exactly the projected members in tuple order.  Tuple
-   property names are not array values and need metadata for reversal.
+   Arrays use [* T], bounded [m*n T], or open occurrence ranges.  Tuples
+   fix members in tuple order, retaining names as metadata.  Sets need
+   residual JSON-equality uniqueness retained or reported; distinct map
+   keys MUST NOT substitute for arbitrary-value set equality.
 
-   A set uses the array carrier, but RFC 8610 provides no general JSON-
-   equality uniqueness assertion for array items.  The processor MUST
-   retain or report that residual rule.  It MUST NOT treat a map's
-   distinct keys as an equivalent set representation for arbitrary
-   values.
-
-   A non-discriminated union maps to / type choice.  A standalone CDDL
-   validator does not provide Core's first-match application type
-   selection.  Overlapping branch identity therefore requires the source
-   order and the selection policy to be retained.
-
-   A tagged choice maps to a type choice of closed single-entry maps
-   with literal text tags.  An inline choice maps to a type choice of
-   materialized maps, each requiring the selector's literal value.  The
-   selector MUST NOT become an optional unconstrained tstr.
-
-   Named Core type references map to named CDDL rules.  Native recursion
-   MAY be preserved where the resulting rules admit the intended finite
-   values.  A processor MUST NOT reject all recursive schemas solely
-   because a reference graph contains a cycle, and MUST NOT replace
-   cycles with any.
+   Unions use /, retaining order/selection policy for overlapping Core
+   branches.  Tagged choices use closed singleton maps; inline choices
+   require literal selectors in materialized maps, not optional
+   unconstrained strings.  Named types become rules.  Finite-valued
+   recursion MAY survive; processors MUST NOT replace cycles with any or
+   reject all recursion because of cycles.
 
 8.1.4.  Controls and Annotations
 
-   Inclusive and exclusive numeric bounds can use exact ranges or
-   comparison controls when the target numeric domain agrees.  Exclusive
-   integer limits MAY be shifted by one after exact integer arithmetic;
-   that transformation MUST NOT be used for floating or decimal limits.
+   Compatible bounds use ranges/comparisons.  Exclusive integer limits
+   MAY shift by one using exact arithmetic; floating/decimal limits MUST
+   NOT.  Constants/enums use literals/type choices and MUST follow the
+   instance binding.
 
-   const and homogeneous finite enum sets can use literal values and
-   type choices.  Constants MUST be transformed through the same
-   instance encoding as their types; a Core integer string becomes a
-   CBOR integer in the native profile, not a quoted digit constant.
+   Text .size counts UTF-8 octets: U+00E9 is one character, two octets.
+   Character limits MUST NOT be copied without unit equivalence. .regexp
+   needs ECMAScript-to-XSD translation; all chained constraints MUST
+   survive through controlled types or intersections. .cbor/.cborseq
+   constrain decoded content, unlike media-type annotations.
 
-   CDDL .size on a text string counts UTF-8 octets, whereas a Core
-   string length counts characters.  A Core maxLength MUST NOT be copied
-   to tstr .size without proving the units agree for that string domain.
-   A one-character string containing U+00E9 occupies two UTF-8 octets.
-
-   CDDL .regexp uses the XSD regular-expression language, not the
-   ECMAScript language used by Core Validation.  A pattern needs
-   semantics-preserving translation.  Chained controls can be expressed
-   through parenthesized controlled types or equivalent intersections; a
-   processor MUST NOT discard all but one source constraint merely
-   because it emits one control at a time.
-
-   CDDL control operators for encoded content, such as .cbor and
-   .cborseq, are not media-type comments.  They impose constraints on
-   decoded content.  Conversely, a source media-type annotation does not
-   by itself impose such decoded-content validation.
-
-   Rule names, group structure, generic parameters, socket identities,
-   and comments require separate consideration for schema round trips.
-   The cddl alternate name can retain a rule spelling but cannot alone
-   retain all of those constructs.
+   Round-trip metadata includes groups, generics, sockets, and comments
+   within scope; altnames.cddl retains rule spelling only.
 
 8.2.  CDDL to JSON Structure
 
@@ -2521,109 +1826,54 @@ Table of Contents
 
                                   Table 11
 
-   The native-negative range for nint is -18446744073709551616 through
-   -1.  Both bounds MUST be retained.  The native int range extends
-   beyond signed 64 bits in both directions as described in
-   Section 8.1.1.  Its Core constraints are string-valued because the
-   containing Core type is int128.
+   nint bounds -18446744073709551616..-1 MUST survive; int uses
+   Section 8.1.1 bounds, encoded as Core int128 constraint strings.
+   Carrier width MUST NOT replace source bounds.  Widened float16 needs
+   representability constraints, not just magnitude limits.
 
-   A bounded rule MUST NOT be inferred to have the range of its carrier.
-   For example, 0..255 can use uint8, but an unbounded bignum cannot.  A
-   float16 value fits a wider finite carrier, but a mere maximum-
-   magnitude restriction does not enforce the gaps between representable
-   half-precision values.
-
-   An undefined value MUST NOT become null.  Unknown tags MUST NOT be
-   discarded.  A declared tagged-value profile MAY represent a tag
-   number and its projected payload as an explicit Core object or tuple;
-   it MUST preserve all tag distinctions within the selected domain.
-
-   Tag 4 decimals require a compatible decimal interpretation, not a
-   binary64 approximation.  Tag 0 textual date-time, tag 1 epoch-based
-   time, and byte-oriented UUID encodings have different
-   representations.  Their tag semantics, numeric range, and text or
-   byte transformations MUST be evaluated individually.  The identifier
-   time in the CDDL prelude does not mean Core's [RFC3339] time-of-day
-   type.
+   Undefined MUST NOT become null.  Unknown tags MUST NOT disappear.
+   Tagged-value profiles MAY use tag-number/payload objects or tuples
+   but MUST retain distinctions.  Tag-4 decimals, tag-0 date-time, tag-1
+   epoch time, and binary UUIDs MUST retain their individual semantics,
+   ranges, and representations.  Prelude time is not Core [RFC3339]
+   time-of-day.
 
 8.2.2.  Structures and Evaluation
 
-   A map with known literal text keys maps to object; a homogeneous map
-   with arbitrary text keys maps to map.  Non-text map keys require an
-   explicitly typed key/value entry representation or rejection.
-   Converting every key to a string can merge distinct keys such as the
-   integer 1 and the text string "1".
+   Known text keys become objects; homogeneous text-keyed maps become
+   maps.  Other keys need typed entries or rejection: stringifying 1 and
+   "1" collapses identity.  Occurrences determine presence/bounds; nil
+   means null, not absence.  Repeated arrays become arrays; fixed groups
+   become named tuples.  Variable, optional, or repeated-group layouts
+   MUST retain adapters/validation or be rejected.
 
-   CDDL occurrences determine requiredness and collection bounds. ? "x":
-   T makes property x optional; T / nil makes its value nullable.  These
-   declarations MUST NOT be substituted for one another.
+   / is an inclusive type choice.  A group choice // selects a complete
+   group of entries. // MUST preserve groups, not unrelated leaves. &(a:
+   1, b: 2) enumerates 1 and 2, with metadata labels. ~ MUST be
+   evaluated before projection, not interpreted as inheritance.
+   Generics MAY be materialized; generic declarations within the claimed
+   round-trip scope MUST survive. /=///= extensions and sockets MUST be
+   assembled first; unknown required controls, unresolved sockets, or
+   unavailable feature conditions prevent losslessness.
 
-   A homogeneous repeated array maps to array.  A fixed array group maps
-   to tuple, with generated or retained member names.  A variable
-   prefix, optional tuple members, or repeated multi-member groups is
-   not a fixed Core tuple.  Flattened group layout MUST be retained by
-   an explicit adapter and validation rule, or rejected as unsupported
-   for structural projection.
-
-   Type choice / is inclusive.  Group choice // applies to group
-   structure and MUST NOT be converted to a choice of unrelated leaf
-   types.  A group-to-choice expression such as &(a: 1, b: 2) can become
-   a numeric enumeration of 1 and 2; the labels are schema metadata, not
-   strings present in the instance.
-
-   Unwrapping with ~ MUST be evaluated before projecting the resulting
-   structure.  It MUST NOT be assumed to mean Core inheritance.  A
-   processor MAY materialize a generic instantiation but MUST retain the
-   generic declaration if that declaration is within the claimed schema-
-   round-trip scope.
-
-   Rules extended by /= or //= and referenced sockets MUST be assembled
-   before type projection.  An unknown required control, unresolved
-   socket, or unavailable feature condition prevents a lossless claim.
-   Ignoring the construct is permitted only as a reported lossy
-   projection.
-
-   Size, regexp, intersection, and decoded-content controls MUST retain
-   their actual semantics.  An octet-count constraint on tstr is not a
-   Core character-count constraint.  A .cbor control on a byte string
-   MUST NOT become only a contentMediaType annotation, nor may the bytes
-   be decoded and re-encoded under a claim that their original octet
-   value is preserved.
+   Size, regexp, intersection, and decoded-content semantics MUST
+   survive. .cbor MUST NOT become only a media-type annotation;
+   decoding/re-encoding MUST NOT claim original octet preservation.
 
 8.3.  JSON Representation Profile
 
-   For CDDL interpreted over JSON, the target MUST use JSON-compatible
-   types and the actual Core JSON representations:
-
-   *  binary uses tstr with the declared binary-text encoding, not bstr.
-
-   *  int64, uint64, int128, uint128, and decimal use tstr with the
-      source grammar and numeric restrictions, not native integer or
-      tagged decimal values.
-
-   *  Small integer types use JSON numbers with the exact source ranges.
-      Floating restrictions concern values accepted from JSON, not the
-      physical width of a CBOR item.
-
-   *  Tags, undefined, non-finite floats, and non-text map keys are
-      excluded unless a separate JSON encoding for them is specified.
-
-   RFC 8610 notes that its JSON numeric model does not express every
-   theoretically possible JSON number precision.  A processor MUST
-   therefore identify the accepted numeric subset or use an explicit
-   alternative representation.  Selecting the JSON profile does not
-   remove that limitation.
-
-   Changing between this profile and the CBOR logical-value profile is
-   an instance transformation.  The same Core uint64 has a quoted
-   decimal-string representation in JSON and an unsigned integer
-   representation in the native CBOR profile.  Both can preserve its
-   numeric value; they are not the same instance shape.
+   JSON profiles MUST use Core encodings: binary as encoded tstr, wide
+   integers and decimals as grammar/range-constrained tstr, small
+   integers as bounded JSON numbers.  Floating constraints concern JSON
+   values, not CBOR widths.  Tags, undefined, non-finites, and non-text
+   keys need separate JSON encodings or exclusion.  RFC 8610 limits JSON
+   numeric precision; accepted subsets or alternative carriers MUST be
+   identified.  Switching native/JSON profiles transforms instances, not
+   necessarily logical values.
 
 8.4.  Example and Preservation Boundary
 
-   The following Core document has a full-width unsigned sequence number
-   and binary payload:
+   A sequence and binary payload:
 
    {
      "$schema": "https://json-structure.org/meta/core/v0/#",
@@ -2638,55 +1888,28 @@ Table of Contents
      "additionalProperties": false
    }
 
-   Its native CBOR-profile CDDL projection is:
+   project to native CBOR:
 
    frame = {
      "sequence": 0..18446744073709551615,
      "payload": bstr
    }
 
-   The canonical value contains the unsigned integer
-   18446744073709551615 and payload octets.  Its native CBOR binding
-   supplies those values directly to a CBOR serializer.  Import recovers
-   the same integer and octet sequence.
-
-   If JSON is selected separately, the instance uses
-   "sequence":"18446744073709551615" and a Base64 payload.  Parsing or
-   producing that text belongs to the JSON boundary, not the native CBOR
-   binding.  Width and encoding annotations still need retention for a
-   model-definition round trip when the target does not identify them
-   uniquely.
-
-   The CDDL-to-Core mapping of unrestricted uint uses uint64, not int64.
-   Its largest value is therefore retained.  The JSON profile would
-   instead describe the sequence as constrained tstr; a digit expression
-   without the upper bound is not enough.
-
-   The native CBOR lossless subset includes exact bounded integers,
-   booleans, null, compatible text, byte strings with an adapter, fixed
-   tuples, supported recursion, and maps with compatible keys and cut
-   semantics.  Decimal domains, generic JSON numbers, set uniqueness,
-   semantic text constraints, and general CBOR-only values require the
-   additional profiles or diagnostics specified above.
+   Native bindings round-trip 18446744073709551615 and payload octets.
+   JSON instead uses constrained digit text and Base64; width/encoding
+   identity needs metadata.
 
 9.  Conformance and Verification
 
-   A conforming projection processor MUST implement the common rules in
-   Section 3 and identify the format section and profile it implements.
-   It MAY support a strict subset of source constructs, provided
-   unsupported constructs are rejected or explicitly reported under a
-   selected lossy policy.
-
-   A schema file that parses successfully is not evidence that its
-   projection preserves values or constraints.  Verification MUST cover
-   the declared source domain, not only observed example data.  For
-   example, seeing several small uint64 values does not justify using a
-   signed 64-bit target carrier.
+   Processors MUST implement Section 3 and identify format and profile.
+   Support MAY be partial if unsupported constructs are rejected or
+   reported under explicit lossy policies.  Verification MUST cover the
+   declared domain, not observed samples.
 
 9.1.  Required Verification Cases
 
-   The following cases identify minimum boundaries for the corresponding
-   claims.  They do not replace testing other applicable constraints.
+   The following cases are a minimum; verification also covers every
+   applicable source constraint.
 
     +==========================================+======================+
     | Source condition                         | Required observation |
@@ -2780,59 +2003,34 @@ Table of Contents
 
                                   Table 12
 
-   Tests for value preservation MUST perform E followed by D and compare
-   the result under Section 3.2.  Tests for constraint preservation MUST
-   include target values outside the transformed source domain.  Tests
-   for schema round trips MUST compare semantic declarations, including
-   field numbers, namespace identities, and defaults where those are in
-   scope.
+   Value tests MUST compare D(E(x)) with x under Section 3.2.
+   Constraint tests MUST include values outside E(S).  Schema tests MUST
+   compare semantic declarations within scope, including field numbers,
+   namespaces, and defaults.
 
 9.2.  Loss Reporting
 
-   Reports MUST distinguish a wider carrier from an exact target type.
-   They MUST also distinguish a rejected source domain from a successful
-   projection of a restricted domain.  Reporting "lossless" after
-   silently restricting to observed data, finite floats, one time
-   precision, or one XML character repertoire is not conforming.
-
-   A retained copy of the source schema MAY aid reconstruction, but does
-   not make the target enforce the source's constraints.  Likewise, an
-   instance adapter can preserve values without making the standalone
-   target schema constraint-equivalent.
+   Reports MUST distinguish exact types from wider carriers, and
+   rejection from successful projection of a restricted domain.  Hidden
+   restrictions cannot justify lossless claims.
 
 10.  Security Considerations
 
-   A lossy projection can remove validation that an application uses as
-   a security boundary.  Examples include dropping a closed-object rule,
-   widening an unsigned range, accepting an unset required choice, or
-   treating a format annotation as an asserted constraint.  Applications
-   MUST NOT rely on discarded restrictions without an identified
-   replacement validator.
+   Applications MUST NOT rely on discarded constraints without
+   replacement validators.  Resolvers SHOULD use explicit retrieval
+   policies, trusted contexts, and limits; loading XSD MUST NOT enable
+   XML external entities.
 
-   Schema references and imports can retrieve attacker-controlled
-   resources.  Implementations SHOULD use explicit retrieval policies,
-   resource limits, and trusted resolution contexts.  XML external
-   entity processing MUST NOT be enabled merely to load an XSD.
+   Implementations SHOULD bound regex matching and reject unverified
+   translations.  Recursion, bounds, generic expansion, bignums, and
+   exponent expansion SHOULD have resource limits reported as failures,
+   not truncation or type substitution.
 
-   Regular-expression translation can alter both accepted values and
-   computational cost.  Implementations SHOULD bound matching resources
-   and reject translations whose semantics cannot be established.
-
-   Recursive references, large bounds, generic expansion, bignums, and
-   conversion of exponent notation into decimal text can require
-   substantial memory or processing time.  Implementations SHOULD impose
-   resource limits and report an exceeded limit as a failure, rather
-   than truncate data or substitute a simpler schema.
-
-   Binary-content annotations and CDDL decoded-content controls can lead
-   to decoding or decompression.  Implementations MUST distinguish
-   annotation retention from a request to process that content and
-   SHOULD limit decoded size and nesting depth.
-
-   Companion metadata, alternate names, and imported field-number
-   correspondences affect interpretation.  They MUST be treated as
-   untrusted input and checked for collisions, invalid identifiers,
-   reserved numbers, and inconsistent type declarations before use.
+   Implementations MUST distinguish content annotations from processing
+   requests and SHOULD limit decoded size and nesting depth.  Metadata,
+   alternate names, and field-number correspondences MUST be treated as
+   untrusted and checked for collisions, illegal identifiers, reserved
+   numbers, and inconsistent declarations.
 
 11.  IANA Considerations
 
